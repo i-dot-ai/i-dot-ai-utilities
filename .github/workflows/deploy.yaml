@@ -1,0 +1,39 @@
+name: Python package
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+        id-token: write
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.11'
+
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python -
+    - name: Install dependencies
+      run: |
+        poetry install
+    - name: Build
+      run: |
+        poetry build
+    - name: Publish to test pypi
+      uses: pypa/gh-action-pypi-publish@release/v1
+      if: github.ref == 'refs/heads/develop'
+      with:
+        repository-url: 'https://test.pypi.org/legacy/'
+    - name: Publish to prod pypi
+      uses: pypa/gh-action-pypi-publish@release/v1
+      if: github.ref == 'refs/heads/main'

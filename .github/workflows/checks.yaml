@@ -1,0 +1,47 @@
+name: Check code
+
+env:
+  DOCKER_BUILDKIT: 1
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
+      - 'develop'
+
+jobs:
+  check_web:
+    name: Check Python
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.9", "3.10", "3.11" ]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Run image
+      uses: abatilo/actions-poetry@v2
+      with:
+        poetry-version: 1.7.0
+
+    - name: Install dependencies
+      run: |
+        poetry install --with dev
+
+    - name: Run lint
+      run: |
+          make lint
+
+    - name: Run tests
+      run: |
+        make test
