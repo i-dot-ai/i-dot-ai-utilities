@@ -1,0 +1,124 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "i-dot-ai-utilities"
+version = "0.1.0"
+description = "Utilities for i.ai to use"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+license = {text = "MIT"}
+authors = [
+    {name = "i-dot-ai-packages", email = "packages@cabinetoffice.gov.uk"},
+]
+keywords = ["python", "package"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "requests>=2.32.3"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/i-dot-ai/i-dot-ai-utilities"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "ruff>=0.11.7",
+    "mypy>=1.15.0",
+]
+
+# [tool.pytest.ini_options]
+# testpaths = ["tests"]
+# python_files = "test_*.py"
+# python_functions = "test_*"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff.lint]
+# Dribble in those we have commented out, asterisked ones first
+select = [
+    "A",
+    "B",
+    "C",
+    "E",
+    "F",
+    "G",
+    "I",
+    "N",
+    "Q",
+    "S",
+    "T",
+    "W",
+    "ARG",
+    "ASYNC",
+    "BLE",
+    "COM",
+    "DJ",
+    "DTZ",
+    "EM",
+    "EXE",
+    "FURB",
+    "ICN",
+    "INT",
+    "ISC",
+    "LOG",
+    "NPY",
+    "PD",
+    "PGH",
+    "PIE",
+    "PL",
+    "PT",
+    "PTH",
+    "PYI",
+    "RET",
+    "RSE",
+    "RUF",
+    "SIM",
+    "SLF",
+    "SLOT",
+    "TCH",
+    "TD",
+    "TID",
+    "TRY",
+    "UP",
+    "YTT",
+]
+exclude = ["out/*"]
+ignore = ["COM812", "DJ001", "RET505", "RET508", "PLR0913"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["i-dot-ai-utilities"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S106", "PLR0913", "PLR0915", "PLR2004", "TD003", "S311"]
+"*/tests/*" = ["S101", "S106", "PLR0913", "PLR0915", "PLR2004", "TD003"]
+"*/tests_playwright/*" = ["S101", "S106", "PLR0913", "PLR2004", "TD003"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.7",
+]
