@@ -1,5 +1,16 @@
 # `i-dot-ai-utilities` Contributing Guide
 
+## Python Semantic Release
+
+### Docs can be found here -> https://py-pkgs.org/07-releasing-versioning.html#automatic-version-bumping
+
+We use this to manage the semver of the project. Configuration options can be found in `pyproject.toml`,
+and actions can be found in `step-version-and-create-release.yaml`.
+
+PSR works by checking commit messages for changes that require version steps. This is done by checking for certain prefixes
+in commit messages. A commit message shoudl be formatted like `fix(mod_plotting): fix confusing error message in plot_words`,
+where `fix` is the type of change, and the name within the brackets is the module or function being changed.
+
 ## How to use uv
 
 #### Docs can be found here -> https://docs.astral.sh/uv/
