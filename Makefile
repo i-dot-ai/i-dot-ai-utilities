@@ -5,5 +5,5 @@ test:
 lint:
 	poetry run ruff check
 	poetry run ruff format --check
-	poetry run mypy src/i-dot-ai-utilities/  --ignore-missing-imports
+	poetry run mypy src/i-dot-ai-utilities/ --ignore-missing-imports
 	poetry run bandit -ll -r src/i-dot-ai-utilities
