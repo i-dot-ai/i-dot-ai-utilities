@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "i-dot-ai-utilities"
-version = "0.1.0"
+version = "0.0.1"
 description = "Utilities for i.ai to use"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
