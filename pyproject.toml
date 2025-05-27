@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "i-dot-ai-utilities"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Utilities for i.ai to use"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -123,5 +123,25 @@ dev = [
     "bandit>=1.8.3",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
+    "python-semantic-release>=10.0.2",
     "ruff>=0.11.7",
 ]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version", "src:i_dot_ai_utilities:__init__.py:__version__"]
+changelog_file = "CHANGELOG.md"
+dist_path = "dist/"
+upload_to_pypi = false
+upload_to_release = true
+build_command = "uv build"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["build", "bugfix", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.remote.token]
+env = "GITHUB_TOKEN"
+
+[tool.semantic_release.version]
+source = "tag"
