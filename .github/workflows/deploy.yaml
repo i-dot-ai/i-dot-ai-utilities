@@ -1,23 +1,18 @@
-name: Release
+name: Release to PyPI
 
 on:
-  push:
-    branches:
-      - main
-      - develop
+  release:
+    types: [published]
 
 jobs:
-  release:
+  deploy:
     runs-on: ubuntu-latest
-    concurrency: release
     permissions:
       id-token: write
-      contents: write
+      contents: read
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Install uv
       uses: astral-sh/setup-uv@v4
@@ -26,20 +21,17 @@ jobs:
       run: uv python install 3.11
 
     - name: Install dependencies
-      run: uv sync --dev
+      run: uv sync
 
-    - name: Python Semantic Release
-      id: release
-      uses: python-semantic-release/python-semantic-release@master
+    - name: Build package
+      run: uv build
+
+    - name: Publish to test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      if: github.event.release.prerelease == true
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        repository-url: 'https://test.pypi.org/legacy/'
 
-    -   name: Publish to test pypi
-        uses: pypa/gh-action-pypi-publish@release/v1
-        if: github.ref == 'refs/heads/develop'
-        with:
-            repository-url: 'https://test.pypi.org/legacy/'
-
-    -   name: Publish to prod pypi
-        uses: pypa/gh-action-pypi-publish@release/v1
-        if: github.ref == 'refs/heads/main'
+    - name: Publish to prod PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      if: github.event.release.prerelease == false
