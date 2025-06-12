@@ -27,6 +27,8 @@ classifiers = [
 ]
 
 dependencies = [
+    "boto3>=1.38.35",
+    "pydantic-settings>=2.9.1",
     "requests>=2.32.3",
     "structlog>=25.4.0",
 ]
