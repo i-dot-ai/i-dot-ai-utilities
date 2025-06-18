@@ -128,3 +128,12 @@ dev = [
     "pytest>=8.3.5",
     "ruff>=0.11.7",
 ]
+
+[tool.hatch.build]
+exclude = [
+    "src/**/__tests__/**",
+    "src/**/__tests__",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/i_dot_ai_utilities"]
