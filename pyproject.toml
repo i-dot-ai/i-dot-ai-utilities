@@ -129,9 +129,6 @@ dev = [
     "ruff>=0.11.7",
 ]
 
-[mypy-test_*]
-check_untyped_defs = False
-
 [tool.hatch.build]
 exclude = [
     "src/**/__tests__/**",
