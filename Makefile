@@ -1,6 +1,6 @@
 test:
 	uv run pytest \
-	--cov automatilib --cov-report term-missing --cov-fail-under 88
+	--cov src/i_dot_ai_utilities --cov-report term-missing --cov-fail-under 88
 
 lint:
 	uv run ruff check
