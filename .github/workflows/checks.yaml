@@ -5,12 +5,6 @@ env:
 
 on:
   push:
-    branches:
-      - 'main'
-      - 'feature/**'
-      - 'bugfix/**'
-      - 'hotfix/**'
-      - 'develop'
 
 jobs:
   check_web:
