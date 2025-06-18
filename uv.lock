@@ -218,7 +218,6 @@ version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },
-    { name = "starlette" },
     { name = "structlog" },
 ]
 
@@ -238,6 +237,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "starlette" },
 ]
 
 [package.metadata]
@@ -247,7 +247,6 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.1.1" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.7" },
-    { name = "starlette", specifier = ">=0.47.0" },
     { name = "structlog", specifier = ">=25.4.0" },
 ]
 provides-extras = ["dev"]
@@ -260,6 +259,7 @@ dev = [
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-cov", specifier = ">=6.1.1" },
     { name = "ruff", specifier = ">=0.11.7" },
+    { name = "starlette", specifier = ">=0.47.0" },
 ]
 
 [[package]]

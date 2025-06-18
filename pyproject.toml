@@ -28,7 +28,6 @@ classifiers = [
 
 dependencies = [
     "requests>=2.32.3",
-    "starlette>=0.47.0",
     "structlog>=25.4.0",
 ]
 
@@ -128,6 +127,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
+    "starlette>=0.47.0",
 ]
 
 [tool.hatch.build]
