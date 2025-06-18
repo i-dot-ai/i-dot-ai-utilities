@@ -1,14 +1,16 @@
-import os
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 import json
+import os
+
 import pytest
+
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
+from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
+from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
 
 def test_simple_logger(capsys):
     logger = StructuredLogger()
-    logger.info('test message')
+    logger.info("test message")
 
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
@@ -16,8 +18,8 @@ def test_simple_logger(capsys):
     parsed = []
     for line in log_lines:
         parsed.append(json.loads(line))
-    
-    assert parsed[1].get('message') == "test message"
+
+    assert parsed[1].get("message") == "test message"
 
 
 def test_base_context_set_correctly(capsys):
@@ -26,7 +28,7 @@ def test_base_context_set_correctly(capsys):
     os.environ["APP_NAME"] = test_app_name
     os.environ["ENVIRONMENT"] = test_env_name
 
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL
     })
 
@@ -43,10 +45,10 @@ def test_base_context_set_correctly(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get('env_app_name') == test_app_name
-    assert parsed[0].get('ship_logs') == 1
-    assert parsed[0].get('env_environment_name') == test_env_name
-    assert parsed[0].get('context_id') == parsed[1].get('context_id')
+    assert parsed[0].get("env_app_name") == test_app_name
+    assert parsed[0].get("ship_logs") == 1
+    assert parsed[0].get("env_environment_name") == test_env_name
+    assert parsed[0].get("context_id") == parsed[1].get("context_id")
 
 
 @pytest.mark.parametrize(
@@ -56,11 +58,11 @@ def test_base_context_set_correctly(capsys):
     ]
 )
 def test_execution_environments_handled(execution_environment_value, capsys):
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": execution_environment_value
     })
 
-    logger.info('test')
+    logger.info("test")
 
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
@@ -69,7 +71,7 @@ def test_execution_environments_handled(execution_environment_value, capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get('message') == "test"
+    assert parsed[0].get("message") == "test"
 
 
 @pytest.mark.parametrize(
@@ -79,12 +81,12 @@ def test_execution_environments_handled(execution_environment_value, capsys):
     ]
 )
 def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL,
         "log_format": log_format_value
     })
 
-    test_message = 'a test message'
+    test_message = "a test message"
     logger.info(test_message)
 
     captured = capsys.readouterr()
@@ -109,12 +111,12 @@ def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
     ]
 )
 def test_shipped_logging_setting_handled(ship_logs_value, ship_logs_expected, capsys):
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL,
         "ship_logs": ship_logs_value
     })
 
-    test_message = 'a test message'
+    test_message = "a test message"
     logger.info(test_message)
 
     captured = capsys.readouterr()
@@ -124,20 +126,20 @@ def test_shipped_logging_setting_handled(ship_logs_value, ship_logs_expected, ca
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get('ship_logs') == ship_logs_expected
+    assert parsed[0].get("ship_logs") == ship_logs_expected
 
 
 def test_incorrect_log_level_handled(capsys):
-    logger = StructuredLogger(level='a_false_value', options={
+    logger = StructuredLogger(level="a_false_value", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL,
     })
 
-    test_message = 'a test message'
+    test_message = "a test message"
     logger.info(test_message)
 
-    logger.debug('This shouldnt be logged')
+    logger.debug("This shouldnt be logged")
 
-    second_test_message = 'a second message'
+    second_test_message = "a second message"
     logger.info(second_test_message)
 
     captured = capsys.readouterr()
@@ -147,7 +149,7 @@ def test_incorrect_log_level_handled(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert "defaulting to INFO" in parsed[0].get('message')
+    assert "defaulting to INFO" in parsed[0].get("message")
 
-    assert parsed[1].get('message') == test_message
-    assert parsed[2].get('message') == second_test_message
+    assert parsed[1].get("message") == test_message
+    assert parsed[2].get("message") == second_test_message

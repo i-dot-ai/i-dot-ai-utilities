@@ -1,9 +1,13 @@
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from i_dot_ai_utilities.logging.types import log_output_format
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType, ContextEnrichmentType
 import json
+
 import pytest
 from starlette.requests import Request
+
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
+from i_dot_ai_utilities.logging.types.enrichment_types import (
+    ContextEnrichmentType,
+    ExecutionEnvironmentType,
+)
 
 
 @pytest.fixture
@@ -27,7 +31,7 @@ def load_test_request_object() -> Request:
 
 
 def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_object, capsys):
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL
     })
 
@@ -38,7 +42,7 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
         }
     ])
 
-    logger.info('test message')
+    logger.info("test message")
 
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
@@ -47,11 +51,11 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert (parsed[0]).get('request_method') == "GET" 
-    assert (parsed[0]).get('request_base_url') == "http://testserver/" 
-    assert (parsed[0]).get('request_path') == "/logger/unit/testing" 
-    assert (parsed[0]).get('request_user_agent') == "test agent" 
-    assert (parsed[0]).get('request_query') == "islogger=true&istest=true" 
+    assert (parsed[0]).get("request_method") == "GET"
+    assert (parsed[0]).get("request_base_url") == "http://testserver/"
+    assert (parsed[0]).get("request_path") == "/logger/unit/testing"
+    assert (parsed[0]).get("request_user_agent") == "test agent"
+    assert (parsed[0]).get("request_query") == "islogger=true&istest=true"
 
 
 @pytest.mark.parametrize(
@@ -63,7 +67,7 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
     ]
 )
 def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value, capsys):
-    logger = StructuredLogger(level='info', options={
+    logger = StructuredLogger(level="info", options={
         "execution_environment": ExecutionEnvironmentType.LOCAL
     })
 
@@ -74,7 +78,7 @@ def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value
         }
     ])
 
-    log_message = 'logger continues working as normal'
+    log_message = "logger continues working as normal"
     logger.warning(log_message)
 
     captured = capsys.readouterr()
@@ -84,8 +88,8 @@ def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert "doesn't conform to RequestLike. Context not set" in parsed[0].get('exception') 
-    assert parsed[0].get('level') == "error"
+    assert "doesn't conform to RequestLike. Context not set" in parsed[0].get("exception")
+    assert parsed[0].get("level") == "error"
 
-    assert parsed[1].get('message') == log_message
-    assert parsed[1].get('level') == 'warning'
+    assert parsed[1].get("message") == log_message
+    assert parsed[1].get("level") == "warning"

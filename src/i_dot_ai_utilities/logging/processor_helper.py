@@ -1,10 +1,11 @@
 import structlog
-
-from structlog.processors import JSONRenderer
 from structlog.dev import ConsoleRenderer
+from structlog.processors import JSONRenderer
+
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
-class ProcessorHelper():
+
+class ProcessorHelper:
     def configure_processors(self, log_level, log_format):
         structlog.configure(
             wrapper_class=structlog.make_filtering_bound_logger(log_level)
@@ -18,7 +19,7 @@ class ProcessorHelper():
                 *self._load_output_processors(log_format),
             ]
         )
-    
+
     def _load_output_processors(self, output_type: LogOutputFormat):
         match output_type:
             case LogOutputFormat.JSON:

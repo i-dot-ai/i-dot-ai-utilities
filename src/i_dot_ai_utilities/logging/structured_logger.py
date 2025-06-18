@@ -1,18 +1,24 @@
 import logging
-import structlog
-import uuid
 import os
-from typing import Any, Dict, List
+import uuid
+from typing import Any
 
-from i_dot_ai_utilities.logging.enrichers.enrichment_provider import EnrichmentProvider, ExecutionEnvironmentType
+import structlog
+
+from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
+    EnrichmentProvider,
+    ExecutionEnvironmentType,
+)
 from i_dot_ai_utilities.logging.processor_helper import ProcessorHelper
 from i_dot_ai_utilities.logging.types.base_context import BaseContext
-from i_dot_ai_utilities.logging.types.context_enrichment_options import ContextEnrichmentOptions
-from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
+from i_dot_ai_utilities.logging.types.context_enrichment_options import (
+    ContextEnrichmentOptions,
+)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
+from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
 
-class StructuredLogger():
+class StructuredLogger:
     """Create a new Structured Logger.
 
     Logs can be output in either JSON or Console format. The execution environment can also be set to enrich log messages with environment-specific context.
@@ -36,14 +42,14 @@ class StructuredLogger():
         if not options:
             options = self._default_config
 
-        self._execution_environment = options.get('execution_environment', self._default_config['execution_environment'])
+        self._execution_environment = options.get("execution_environment", self._default_config["execution_environment"])
         self._enricher_provider = EnrichmentProvider(self._execution_environment)
 
-        self._log_format = options.get('log_format', self._default_config['log_format'])
+        self._log_format = options.get("log_format", self._default_config["log_format"])
         self._ship_logs = self._should_ship_logs(options)
 
         ProcessorHelper().configure_processors(
-            self._normalise_log_level(level), 
+            self._normalise_log_level(level),
             self._log_format,
         )
 
@@ -143,21 +149,21 @@ class StructuredLogger():
         """
         structlog.contextvars.bind_contextvars(**{field_key: field_value})
 
-    def refresh_context(self, context_enrichers: List[ContextEnrichmentOptions] | None = None) -> None:
+    def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
         """
         structlog.contextvars.clear_contextvars()
-        self._upsert_base_context() 
+        self._upsert_base_context()
 
         if context_enrichers is None:
             return
-    
+
         additional_context = {}
         for enricher in context_enrichers:
-            type = enricher['type']
-            object = enricher['object']
+            type = enricher["type"]
+            object = enricher["object"]
             ctx = self._enricher_provider.extract_context_from_framework_enricher(self, type, object)
 
             if ctx is not None:
@@ -165,9 +171,9 @@ class StructuredLogger():
 
         structlog.contextvars.bind_contextvars(**additional_context)
 
-    def _should_ship_logs(self, options: LoggerConfigOptions) -> bool: 
-        selected_option = options.get('ship_logs', self._default_config['ship_logs'])
-        if options.get('log_format', self._default_config['log_format']) is not LogOutputFormat.JSON and selected_option is True:
+    def _should_ship_logs(self, options: LoggerConfigOptions) -> bool:
+        selected_option = options.get("ship_logs", self._default_config["ship_logs"])
+        if options.get("log_format", self._default_config["log_format"]) is not LogOutputFormat.JSON and selected_option is True:
             self._logger.warning("Warning(Logger): messages cannot be shipped downstream outside of JSON format. Disabling log shipping")
             return False
 
@@ -183,7 +189,7 @@ class StructuredLogger():
             )
             return message_template
 
-    def _set_environment_context(self, environment_context: Dict[str, Any]):
+    def _set_environment_context(self, environment_context: dict[str, Any]):
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
@@ -194,21 +200,21 @@ class StructuredLogger():
 
         base_context: BaseContext = {
             "context_id": str(uuid.uuid4()),
-            "env_app_name": os.environ.get('APP_NAME', 'unknown'),
-            "env_environment_name": os.environ.get('ENVIRONMENT', 'unknown'),
+            "env_app_name": os.environ.get("APP_NAME", "unknown"),
+            "env_environment_name": os.environ.get("ENVIRONMENT", "unknown"),
             "ship_logs": 1 if self._ship_logs else 0,
         }
         structlog.contextvars.bind_contextvars(**base_context)
 
     def _normalise_log_level(self, level: str | int) -> int:
         match level.upper() if isinstance(level, str) else level:
-            case 'DEBUG' | logging.DEBUG:
+            case "DEBUG" | logging.DEBUG:
                 return logging.DEBUG
-            case 'INFO' | 'INFORMATION' | 'INFORMATIONAL' | logging.INFO:
+            case "INFO" | "INFORMATION" | "INFORMATIONAL" | logging.INFO:
                 return logging.INFO
-            case 'WARN' | 'WARNING' | logging.WARNING:
+            case "WARN" | "WARNING" | logging.WARNING:
                 return logging.WARNING
-            case 'ERROR'| logging.ERROR:
+            case "ERROR"| logging.ERROR:
                 return logging.ERROR
             case _:
                 self._logger.warning(f'Log level "{level}" not recognised, defaulting to INFO')

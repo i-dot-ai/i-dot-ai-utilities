@@ -1,14 +1,22 @@
-from typing import Any, Dict
+from typing import Any
 
-from i_dot_ai_utilities.logging.enrichers.fastapi_enricher import FastApiEnricher, RequestLike
-from i_dot_ai_utilities.logging.enrichers.fargate_enricher import FargateEnvironmentEnricher
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType, ContextEnrichmentType
+from i_dot_ai_utilities.logging.enrichers.fargate_enricher import (
+    FargateEnvironmentEnricher,
+)
+from i_dot_ai_utilities.logging.enrichers.fastapi_enricher import (
+    FastApiEnricher,
+    RequestLike,
+)
+from i_dot_ai_utilities.logging.types.enrichment_types import (
+    ContextEnrichmentType,
+    ExecutionEnvironmentType,
+)
 
 
-class EnrichmentProvider():
+class EnrichmentProvider:
     _fast_api_enricher: FastApiEnricher
     _execution_environment_enricher: FargateEnvironmentEnricher | None
-    _execution_environment_context_cache: Dict[str, Any] | None = None
+    _execution_environment_context_cache: dict[str, Any] | None = None
     _has_environment_context_extraction_ran = False
 
     def __init__(self, execution_environment: ExecutionEnvironmentType):
@@ -31,7 +39,7 @@ class EnrichmentProvider():
     def load_execution_environment_context(self, self_logger):
         if self._execution_environment_enricher is None:
             return None
-        
+
         if self._has_environment_context_extraction_ran:
             return self._execution_environment_context_cache
 

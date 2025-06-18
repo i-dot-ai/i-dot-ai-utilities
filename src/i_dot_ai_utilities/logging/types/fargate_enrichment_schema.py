@@ -1,6 +1,7 @@
 from typing import TypedDict
 
-class FargateContainerLabelsLike():
+
+class FargateContainerLabelsLike:
     def __init__(self, raw_labels: dict[str, str]):
         self._raw = raw_labels
 
