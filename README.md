@@ -7,6 +7,10 @@ It provides common features used in many of our applications.
 
 ### Current features:
 
+#### Structured Logging
+
+You can find information on usage of the logging library in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+
 ### Future features:
 
 - keycloak authentication
