@@ -13,11 +13,17 @@ from i_dot_ai_utilities.logging.processor_helper import ProcessorHelper
 from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
+from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
+    ExtractedFargateContext,
+)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
+    from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
+        ExtractedFastApiContext,
+    )
 
 
 class StructuredLogger:
@@ -173,7 +179,7 @@ class StructuredLogger:
         if context_enrichers is None:
             return
 
-        additional_context = {}
+        additional_context: ExtractedFastApiContext | dict[str, Any] = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]
@@ -216,7 +222,9 @@ class StructuredLogger:
             )
             return message_template
 
-    def _set_environment_context(self, environment_context: dict[str, Any]) -> None:
+    def _set_environment_context(
+        self, environment_context: ExtractedFargateContext | None
+    ) -> None:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
