@@ -1,3 +1,4 @@
+from typing import Any
 from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
     ExtractedFastApiContext,
     RequestLike,
@@ -5,11 +6,9 @@ from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
 
 
 class FastApiEnricher:
-    @staticmethod
-    def extract_context(logger, request: RequestLike) -> ExtractedFastApiContext | None:
+    def extract_context(self, logger: Any, request: RequestLike) -> ExtractedFastApiContext | None:
         try:
-            if not isinstance(request, RequestLike):
-                raise Exception(f"Exception(Logger): Request object of type {type(request)} doesn't conform to RequestLike. Context not set.")
+            self._validate_object_instance(request)
 
             return {
                 "request_method": request.method,
@@ -18,6 +17,10 @@ class FastApiEnricher:
                 "request_path": request.url.path,
                 "request_query": request.url.query
             }
-        except:
+        except Exception:
             logger.exception("Exception(Logger): Failed to extract FastAPI fields")
             return None
+
+    def _validate_object_instance(self, request: RequestLike) -> None:
+        if not isinstance(request, RequestLike):
+            raise TypeError(f"Exception(Logger): Request object doesn't conform to RequestLike. Context not set.")

@@ -12,9 +12,9 @@ from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
 class FargateEnvironmentEnricher:
     _container_metadata_url_parameter_name: str = "ECS_CONTAINER_METADATA_URI_V4"
 
-    def extract_context(self, self_logger) -> ExtractedFargateContext | None:
+    def extract_context(self, self_logger: Any) -> ExtractedFargateContext | None:
         try:
-            metadata_response = self._get_metadata_response(self._container_metadata_url_parameter_name)
+            metadata_response = self._get_metadata_response()
             loaded_metadata = FargateContainerMetadataResponse(metadata_response)
 
             return {
@@ -26,11 +26,14 @@ class FargateEnvironmentEnricher:
             self_logger.exception("Exception(Logger): Failed to extract Fargate container metadata fields")
             return None
 
-    def _get_metadata_response(self, url) -> dict[str, Any]:
+    def _get_metadata_response(self) -> Any:
         url = os.environ.get(self._container_metadata_url_parameter_name, None)
 
         if url is None:
             raise Exception("Failed to find metadata URL on environment")
+        
+        if not url.startswith(("http:", "https:")):
+            raise ValueError("URL must start with 'http:' or 'https:'")
 
         with request.urlopen(url) as response:
             return json.loads(response.read())
@@ -41,5 +44,6 @@ class FargateContainerMetadataResponse:
             self.image_id: str = raw_response["ImageID"]
             self.started_at: str = raw_response["StartedAt"]
             self.labels: FargateContainerLabelsLike = FargateContainerLabelsLike(raw_response["Labels"])
-        except Exception:
-            raise Exception("Exception(Logger): Response doesn't conform to FargateContainerMetadataResponse. Context not set.")
+        except Exception as e:
+            msg = "Exception(Logger): Response doesn't conform to FargateContainerMetadataResponse. Context not set."
+            raise TypeError(msg) from e

@@ -21,8 +21,8 @@ def test_all_log_levels_log_as_expected(capsys):
     logger.error(message)
 
     try:
-        1 / 0
-    except:
+        1 / 0 # noqa: B018
+    except ZeroDivisionError:
         logger.exception(message)
 
     captured = capsys.readouterr()

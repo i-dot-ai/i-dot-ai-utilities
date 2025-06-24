@@ -1,7 +1,7 @@
 import logging
 import os
 import uuid
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import structlog
 
@@ -10,7 +10,10 @@ from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     ExecutionEnvironmentType,
 )
 from i_dot_ai_utilities.logging.processor_helper import ProcessorHelper
-from i_dot_ai_utilities.logging.types.base_context import BaseContext
+
+if TYPE_CHECKING:
+    from i_dot_ai_utilities.logging.types.base_context import BaseContext
+
 from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
@@ -22,8 +25,8 @@ class StructuredLogger:
     """Create a new Structured Logger.
 
     Logs can be output in either JSON or Console format. The execution environment can also be set to enrich log messages with environment-specific context.
-    
-    See the i.AI utils readme for full details on usage. 
+
+    See the i.AI utils readme for full details on usage.
 
     :param level: The logging level. Log messages raised at this urgency or above will be written to stdout. Defaults to 'INFO'. Example values: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
     :param options: A set of LoggerConfigOptions that can be used to modify the logger behaviour.
@@ -55,7 +58,7 @@ class StructuredLogger:
 
         self._upsert_base_context()
 
-    def debug(self, message_template, **kwargs):
+    def debug(self, message_template: str, **kwargs: dict[str, Any]) -> None:
         """Write a debug log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -65,14 +68,14 @@ class StructuredLogger:
         logger.debug('User started login flow', id=12345) # Log output: {"message": "User started login flow", "id": 12345}
 
         logger.debug('User {email} has logged in', email='me@example.com') # Log output: {"message": "User me@example.com has logged in", "email": "me@example.com"}
-        
+
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.debug(message, message_template=message_template, **kwargs)
 
-    def info(self, message_template, **kwargs):
+    def info(self, message_template: str, **kwargs: dict[str, Any]) -> None:
         """Write an informational log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -89,7 +92,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.info(message, message_template=message_template, **kwargs)
 
-    def warning(self, message_template, **kwargs):
+    def warning(self, message_template: str, **kwargs: dict[str, Any]) -> None:
         """Write a warning log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -106,7 +109,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.warning(message, message_template=message_template, **kwargs)
 
-    def error(self, message_template, **kwargs):
+    def error(self, message_template: str, **kwargs: dict[str, Any]) -> None:
         """Write an error log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -123,7 +126,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.error(message, message_template=message_template, **kwargs)
 
-    def exception(self, message_template, **kwargs):
+    def exception(self, message_template: str, **kwargs: dict[str, Any]) -> None:
         """Write a caught exception, along with an error log message. Caught exceptions will automatically be added as context to the log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -139,7 +142,7 @@ class StructuredLogger:
 
     def set_context_field(self, field_key: str, field_value: str | int | bool) -> None:
         """Add a custom field to the logger dictionary. This field will appear on subsequent log messages.
-         
+
         This key and value will be made available as a searchable field in the downstream logging stack.
 
         A field set using this function will be removed upon a refresh of the logger context.
@@ -162,9 +165,9 @@ class StructuredLogger:
 
         additional_context = {}
         for enricher in context_enrichers:
-            type = enricher["type"]
-            object = enricher["object"]
-            ctx = self._enricher_provider.extract_context_from_framework_enricher(self, type, object)
+            enricher_type = enricher["type"]
+            enricher_object = enricher["object"]
+            ctx = self._enricher_provider.extract_context_from_framework_enricher(self, enricher_type, enricher_object)
 
             if ctx is not None:
                 additional_context.update(ctx)
@@ -179,7 +182,7 @@ class StructuredLogger:
 
         return selected_option
 
-    def _get_interpolated_message(self, message_template: str, **kwargs):
+    def _get_interpolated_message(self, message_template: str, **kwargs: dict[str, Any]) -> str:
         try:
             return message_template.format(**kwargs)
         except KeyError:
@@ -189,7 +192,7 @@ class StructuredLogger:
             )
             return message_template
 
-    def _set_environment_context(self, environment_context: dict[str, Any]):
+    def _set_environment_context(self, environment_context: dict[str, Any]) -> None:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
@@ -217,7 +220,9 @@ class StructuredLogger:
             case "ERROR"| logging.ERROR:
                 return logging.ERROR
             case _:
-                self._logger.warning(f'Log level "{level}" not recognised, defaulting to INFO')
+                self._logger.warning(
+                    f'Log level "{level}" not recognised, defaulting to INFO'
+                )
                 return logging.INFO
 
     def _load_config_defaults(self) -> LoggerConfigOptions:
