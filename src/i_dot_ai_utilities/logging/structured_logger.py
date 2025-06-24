@@ -1,7 +1,7 @@
 import logging
 import os
 import uuid
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -10,15 +10,14 @@ from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     ExecutionEnvironmentType,
 )
 from i_dot_ai_utilities.logging.processor_helper import ProcessorHelper
-
-if TYPE_CHECKING:
-    from i_dot_ai_utilities.logging.types.base_context import BaseContext
-
 from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
+
+if TYPE_CHECKING:
+    from i_dot_ai_utilities.logging.types.base_context import BaseContext
 
 
 class StructuredLogger:

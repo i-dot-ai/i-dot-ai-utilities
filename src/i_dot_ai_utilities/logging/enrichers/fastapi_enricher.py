@@ -1,9 +1,9 @@
+from typing import Any
+
 from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
     ExtractedFastApiContext,
     RequestLike,
 )
-
-from typing import Any
 
 
 class FastApiEnricher:
