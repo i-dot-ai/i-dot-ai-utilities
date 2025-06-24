@@ -104,7 +104,7 @@ def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
 
 
 @pytest.mark.parametrize(
-    "ship_logs_value, ship_logs_expected", [
+    ("ship_logs_value", "ship_logs_expected"), [
         (True, 1),
         (1, 1),
         (False, 0),

@@ -42,7 +42,7 @@ def test_all_log_levels_log_as_expected(capsys):
 
 
 @pytest.mark.parametrize(
-    "log_level, expected_log_count", [
+    ("log_level", "expected_log_count"), [
         ("debug", 4),
         ("info", 3),
         ("warning", 2),

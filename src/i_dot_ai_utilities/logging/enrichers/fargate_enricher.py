@@ -8,7 +8,6 @@ from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
     FargateContainerLabelsLike,
 )
 
-
 class FargateEnvironmentEnricher:
     _container_metadata_url_parameter_name: str = "ECS_CONTAINER_METADATA_URI_V4"
 
@@ -16,21 +15,21 @@ class FargateEnvironmentEnricher:
         try:
             metadata_response = self._get_metadata_response()
             loaded_metadata = FargateContainerMetadataResponse(metadata_response)
-
-            return {
-                "fargate_image_id": loaded_metadata.image_id,
-                "fargate_task_arn": loaded_metadata.labels.task_arn,
-                "fargate_container_started_at": loaded_metadata.started_at,
-            }
-        except:
+        except Exception:
             self_logger.exception("Exception(Logger): Failed to extract Fargate container metadata fields")
             return None
+
+        return {
+            "fargate_image_id": loaded_metadata.image_id,
+            "fargate_task_arn": loaded_metadata.labels.task_arn,
+            "fargate_container_started_at": loaded_metadata.started_at,
+        }
 
     def _get_metadata_response(self) -> Any:
         url = os.environ.get(self._container_metadata_url_parameter_name, None)
 
         if url is None:
-            raise Exception("Failed to find metadata URL on environment")
+            raise ValueError("Failed to find metadata URL on environment")
         
         if not url.startswith(("http:", "https:")):
             raise ValueError("URL must start with 'http:' or 'https:'")
