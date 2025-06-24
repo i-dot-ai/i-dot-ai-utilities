@@ -1,8 +1,9 @@
-from typing import Any
 from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
     ExtractedFastApiContext,
     RequestLike,
 )
+
+from typing import Any
 
 
 class FastApiEnricher:
@@ -25,6 +26,5 @@ class FastApiEnricher:
 
     def _validate_object_instance(self, request: RequestLike) -> None:
         if not isinstance(request, RequestLike):
-            raise TypeError(
-                f"Exception(Logger): Request object doesn't conform to RequestLike. Context not set."
-            )
+            msg = "Exception(Logger): Request object doesn't conform to RequestLike. Context not set."
+            raise TypeError(msg)

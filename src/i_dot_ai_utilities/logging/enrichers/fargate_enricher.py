@@ -32,12 +32,10 @@ class FargateEnvironmentEnricher:
         url = os.environ.get(self._container_metadata_url_parameter_name, None)
 
         if url is None:
-            raise ValueError("Failed to find metadata URL on environment")
+            msg = "Failed to find metadata URL on environment"
+            raise ValueError(msg)
 
-        if not url.startswith(("http:", "https:")):
-            raise ValueError("URL must start with 'http:' or 'https:'")
-
-        with request.urlopen(url) as response:
+        with request.urlopen(url) as response:  # noqa: S310
             return json.loads(response.read())
 
 

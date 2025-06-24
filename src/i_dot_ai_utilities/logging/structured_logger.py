@@ -240,7 +240,7 @@ class StructuredLogger:
                 return logging.ERROR
             case _:
                 self._logger.warning(
-                    f'Log level "{level}" not recognised, defaulting to INFO'
+                    "Log level {level} not recognised, defaulting to INFO", level=level
                 )
                 return logging.INFO
 

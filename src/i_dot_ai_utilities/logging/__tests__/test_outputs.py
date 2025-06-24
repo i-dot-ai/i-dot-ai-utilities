@@ -90,12 +90,12 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
         "This is a test message. Email: {email}, ID: {id}. Fields will be interpolated"
     )
     email = "foo@baz.com"
-    id = 12345
+    user_id = 12345
 
     logger.info(
         templated_message_string,
         email=email,
-        id=id,
+        id=user_id,
     )
 
     test_dict = {"foo": {"bar": "baz"}}
@@ -123,7 +123,7 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
     )
     assert parsed[0].get("message_template") == templated_message_string
     assert parsed[0].get("email") == email
-    assert parsed[0].get("id") == id
+    assert parsed[0].get("id") == user_id
 
     assert isinstance(parsed[1].get("message"), str)
     assert parsed[1].get("test_dict").get("foo").get("bar") == "baz"
