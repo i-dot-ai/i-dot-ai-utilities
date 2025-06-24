@@ -10,9 +10,12 @@ from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironme
 
 
 def test_all_log_levels_log_as_expected(capsys):
-    logger = StructuredLogger("debug", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        "debug",
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
     message = "test message"
     logger.debug(message)
@@ -21,7 +24,7 @@ def test_all_log_levels_log_as_expected(capsys):
     logger.error(message)
 
     try:
-        1 / 0 # noqa: B018
+        1 / 0  # noqa: B018
     except ZeroDivisionError:
         logger.exception(message)
 
@@ -42,17 +45,21 @@ def test_all_log_levels_log_as_expected(capsys):
 
 
 @pytest.mark.parametrize(
-    ("log_level", "expected_log_count"), [
+    ("log_level", "expected_log_count"),
+    [
         ("debug", 4),
         ("info", 3),
         ("warning", 2),
         ("error", 1),
-    ]
+    ],
 )
 def test_log_levels_omit_logs_if_below_set_level(log_level, expected_log_count, capsys):
-    logger = StructuredLogger(log_level, options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        log_level,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
     message = "test message"
 
@@ -72,13 +79,18 @@ def test_log_levels_omit_logs_if_below_set_level(log_level, expected_log_count, 
 
 
 def test_log_message_interpolation_works_and_fields_added(capsys):
-    logger = StructuredLogger(logging.INFO, options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
-    templated_message_string = "This is a test message. Email: {email}, ID: {id}. Fields will be interpolated"
-    email="foo@baz.com"
-    id=12345
+    templated_message_string = (
+        "This is a test message. Email: {email}, ID: {id}. Fields will be interpolated"
+    )
+    email = "foo@baz.com"
+    id = 12345
 
     logger.info(
         templated_message_string,
@@ -86,19 +98,17 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
         id=id,
     )
 
-    test_dict = {"foo": {"bar" : "baz"}}
-    templated_message_dict = "This is a test with a nested dictionary. Dictionary is {test_dict}. Fin"
-    logger.info(
-        templated_message_dict,
-        test_dict=test_dict
+    test_dict = {"foo": {"bar": "baz"}}
+    templated_message_dict = (
+        "This is a test with a nested dictionary. Dictionary is {test_dict}. Fin"
     )
+    logger.info(templated_message_dict, test_dict=test_dict)
 
     test_array = [0, 1, 2, 3, [4, "test_item"], 5]
-    templated_message_array = "This is a test with a nested array. Array is {test_array}. Fin"
-    logger.info(
-        templated_message_array,
-        test_array=test_array
+    templated_message_array = (
+        "This is a test with a nested array. Array is {test_array}. Fin"
     )
+    logger.info(templated_message_array, test_array=test_array)
 
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
@@ -107,7 +117,10 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get("message") == "This is a test message. Email: foo@baz.com, ID: 12345. Fields will be interpolated"
+    assert (
+        parsed[0].get("message")
+        == "This is a test message. Email: foo@baz.com, ID: 12345. Fields will be interpolated"
+    )
     assert parsed[0].get("message_template") == templated_message_string
     assert parsed[0].get("email") == email
     assert parsed[0].get("id") == id
@@ -120,9 +133,12 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
 
 
 def test_string_interpolation_failure_handled_by_logger(capsys):
-    logger = StructuredLogger(logging.INFO, options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
     templated_message_string = "This is a test message. Email: {missing}"
 
@@ -137,7 +153,10 @@ def test_string_interpolation_failure_handled_by_logger(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get("message") == "Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?"
+    assert (
+        parsed[0].get("message")
+        == "Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?"
+    )
 
     assert parsed[1].get("message") == templated_message_string
     assert parsed[1].get("message_template") == templated_message_string
@@ -146,9 +165,12 @@ def test_string_interpolation_failure_handled_by_logger(capsys):
 
 
 def test_context_refresh_resets_context(capsys):
-    logger = StructuredLogger(logging.INFO, options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
     logger.info("Initial test message", added_context="initial_context")
 

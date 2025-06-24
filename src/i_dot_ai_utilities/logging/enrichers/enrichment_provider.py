@@ -28,12 +28,22 @@ class EnrichmentProvider:
             case _:
                 self._execution_environment_enricher = None
 
-    def extract_context_from_framework_enricher(self, self_logger, enricher_type: ContextEnrichmentType, enricher_object: RequestLike):
+    def extract_context_from_framework_enricher(
+        self,
+        self_logger,
+        enricher_type: ContextEnrichmentType,
+        enricher_object: RequestLike,
+    ):
         match enricher_type:
             case ContextEnrichmentType.FASTAPI:
-                return self._fast_api_enricher.extract_context(self_logger, enricher_object)
+                return self._fast_api_enricher.extract_context(
+                    self_logger, enricher_object
+                )
             case _:
-                self_logger.exception('Exception(Logger): An enricher type of "{enricher_type}" was not recognised, no context added.', enricher_type=enricher_type)
+                self_logger.exception(
+                    'Exception(Logger): An enricher type of "{enricher_type}" was not recognised, no context added.',
+                    enricher_type=enricher_type,
+                )
                 return None
 
     def load_execution_environment_context(self, self_logger):
@@ -43,6 +53,8 @@ class EnrichmentProvider:
         if self._has_environment_context_extraction_ran:
             return self._execution_environment_context_cache
 
-        self._execution_environment_context_cache = self._execution_environment_enricher.extract_context(self_logger)
+        self._execution_environment_context_cache = (
+            self._execution_environment_enricher.extract_context(self_logger)
+        )
         self._has_environment_context_extraction_ran = True
         return self._execution_environment_context_cache

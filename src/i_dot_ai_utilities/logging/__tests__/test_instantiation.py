@@ -30,9 +30,9 @@ def test_base_context_set_correctly(capsys):
     os.environ["APP_NAME"] = test_app_name
     os.environ["ENVIRONMENT"] = test_env_name
 
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL
-    })
+    logger = StructuredLogger(
+        level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL}
+    )
 
     first_message = "Message 1 created successfully"
     second_message = "Message 2 created successfully"
@@ -54,15 +54,16 @@ def test_base_context_set_correctly(capsys):
 
 
 @pytest.mark.parametrize(
-    "execution_environment_value", [
+    "execution_environment_value",
+    [
         "a_false_value",
         ExecutionEnvironmentType.LOCAL,
-    ]
+    ],
 )
 def test_execution_environments_handled(execution_environment_value, capsys):
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": execution_environment_value
-    })
+    logger = StructuredLogger(
+        level="info", options={"execution_environment": execution_environment_value}
+    )
 
     logger.info("test")
 
@@ -76,17 +77,15 @@ def test_execution_environments_handled(execution_environment_value, capsys):
     assert parsed[0].get("message") == "test"
 
 
-@pytest.mark.parametrize(
-    "log_format_value", [
-        "a_false_value",
-        LogOutputFormat.TEXT
-    ]
-)
+@pytest.mark.parametrize("log_format_value", ["a_false_value", LogOutputFormat.TEXT])
 def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-        "log_format": log_format_value
-    })
+    logger = StructuredLogger(
+        level="info",
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+            "log_format": log_format_value,
+        },
+    )
 
     test_message = "a test message"
     logger.info(test_message)
@@ -104,19 +103,17 @@ def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
 
 
 @pytest.mark.parametrize(
-    ("ship_logs_value", "ship_logs_expected"), [
-        (True, 1),
-        (1, 1),
-        (False, 0),
-        (0, 0),
-        ("a_truthy_value", 1)
-    ]
+    ("ship_logs_value", "ship_logs_expected"),
+    [(True, 1), (1, 1), (False, 0), (0, 0), ("a_truthy_value", 1)],
 )
 def test_shipped_logging_setting_handled(ship_logs_value, ship_logs_expected, capsys):
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-        "ship_logs": ship_logs_value
-    })
+    logger = StructuredLogger(
+        level="info",
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+            "ship_logs": ship_logs_value,
+        },
+    )
 
     test_message = "a test message"
     logger.info(test_message)
@@ -132,9 +129,12 @@ def test_shipped_logging_setting_handled(ship_logs_value, ship_logs_expected, ca
 
 
 def test_incorrect_log_level_handled(capsys):
-    logger = StructuredLogger(level="a_false_value", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL,
-    })
+    logger = StructuredLogger(
+        level="a_false_value",
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
 
     test_message = "a test message"
     logger.info(test_message)

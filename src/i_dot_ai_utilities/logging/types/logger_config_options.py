@@ -1,4 +1,3 @@
-
 from typing import NotRequired, TypedDict
 
 from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (

@@ -31,6 +31,7 @@ class StructuredLogger:
     :param level: The logging level. Log messages raised at this urgency or above will be written to stdout. Defaults to 'INFO'. Example values: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
     :param options: A set of LoggerConfigOptions that can be used to modify the logger behaviour.
     """
+
     _logger: Any
     _default_config: LoggerConfigOptions
     _execution_environment: ExecutionEnvironmentType
@@ -38,14 +39,20 @@ class StructuredLogger:
     _log_format: LogOutputFormat
     _ship_logs: bool
 
-    def __init__(self, level: str | int = logging.INFO, options: LoggerConfigOptions | None = None):
+    def __init__(
+        self,
+        level: str | int = logging.INFO,
+        options: LoggerConfigOptions | None = None,
+    ):
         self._logger = structlog.get_logger()
 
         self._default_config = self._load_config_defaults()
         if not options:
             options = self._default_config
 
-        self._execution_environment = options.get("execution_environment", self._default_config["execution_environment"])
+        self._execution_environment = options.get(
+            "execution_environment", self._default_config["execution_environment"]
+        )
         self._enricher_provider = EnrichmentProvider(self._execution_environment)
 
         self._log_format = options.get("log_format", self._default_config["log_format"])
@@ -152,7 +159,9 @@ class StructuredLogger:
         """
         structlog.contextvars.bind_contextvars(**{field_key: field_value})
 
-    def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
+    def refresh_context(
+        self, context_enrichers: list[ContextEnrichmentOptions] | None = None
+    ) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
@@ -167,7 +176,9 @@ class StructuredLogger:
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]
-            ctx = self._enricher_provider.extract_context_from_framework_enricher(self, enricher_type, enricher_object)
+            ctx = self._enricher_provider.extract_context_from_framework_enricher(
+                self, enricher_type, enricher_object
+            )
 
             if ctx is not None:
                 additional_context.update(ctx)
@@ -176,13 +187,21 @@ class StructuredLogger:
 
     def _should_ship_logs(self, options: LoggerConfigOptions) -> bool:
         selected_option = options.get("ship_logs", self._default_config["ship_logs"])
-        if options.get("log_format", self._default_config["log_format"]) is not LogOutputFormat.JSON and selected_option is True:
-            self._logger.warning("Warning(Logger): messages cannot be shipped downstream outside of JSON format. Disabling log shipping")
+        if (
+            options.get("log_format", self._default_config["log_format"])
+            is not LogOutputFormat.JSON
+            and selected_option is True
+        ):
+            self._logger.warning(
+                "Warning(Logger): messages cannot be shipped downstream outside of JSON format. Disabling log shipping"
+            )
             return False
 
         return selected_option
 
-    def _get_interpolated_message(self, message_template: str, **kwargs: dict[str, Any]) -> str:
+    def _get_interpolated_message(
+        self, message_template: str, **kwargs: dict[str, Any]
+    ) -> str:
         try:
             return message_template.format(**kwargs)
         except KeyError:
@@ -217,7 +236,7 @@ class StructuredLogger:
                 return logging.INFO
             case "WARN" | "WARNING" | logging.WARNING:
                 return logging.WARNING
-            case "ERROR"| logging.ERROR:
+            case "ERROR" | logging.ERROR:
                 return logging.ERROR
             case _:
                 self._logger.warning(

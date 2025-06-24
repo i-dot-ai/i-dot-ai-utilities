@@ -28,6 +28,4 @@ class ProcessorHelper:
                     JSONRenderer(),
                 )
             case _:
-                return (
-                    ConsoleRenderer(),
-                )
+                return (ConsoleRenderer(),)

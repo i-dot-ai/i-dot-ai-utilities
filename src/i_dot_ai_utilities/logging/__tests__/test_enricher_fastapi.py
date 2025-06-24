@@ -18,9 +18,7 @@ def load_test_request_object() -> Request:
         "type": "http",
         "method": "GET",
         "path": "/logger/unit/testing",
-        "headers": [
-            (b"user-agent", b"test agent")
-        ],
+        "headers": [(b"user-agent", b"test agent")],
         "query_string": b"islogger=true&istest=true",
         "client": ("testclient", 50000),
         "server": ("testserver", 80),
@@ -32,17 +30,21 @@ def load_test_request_object() -> Request:
     return Request(scope)
 
 
-def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_object, capsys):
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL
-    })
+def test_fastapi_enriched_logger_contains_expected_fields(
+    load_test_request_object, capsys
+):
+    logger = StructuredLogger(
+        level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL}
+    )
 
-    logger.refresh_context(context_enrichers=[
-        {
-            "type": ContextEnrichmentType.FASTAPI,
-            "object": load_test_request_object,
-        }
-    ])
+    logger.refresh_context(
+        context_enrichers=[
+            {
+                "type": ContextEnrichmentType.FASTAPI,
+                "object": load_test_request_object,
+            }
+        ]
+    )
 
     logger.info("test message")
 
@@ -61,24 +63,29 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
 
 
 @pytest.mark.parametrize(
-    "fastpi_request_object_value", [
+    "fastpi_request_object_value",
+    [
         {"a_dummy_response": True},
         None,
         0,
         "blah",
-    ]
+    ],
 )
-def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value, capsys):
-    logger = StructuredLogger(level="info", options={
-        "execution_environment": ExecutionEnvironmentType.LOCAL
-    })
+def test_fastapi_enrichment_handles_malformed_object(
+    fastpi_request_object_value, capsys
+):
+    logger = StructuredLogger(
+        level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL}
+    )
 
-    logger.refresh_context(context_enrichers=[
-        {
-            "type": ContextEnrichmentType.FASTAPI,
-            "object": fastpi_request_object_value,
-        }
-    ])
+    logger.refresh_context(
+        context_enrichers=[
+            {
+                "type": ContextEnrichmentType.FASTAPI,
+                "object": fastpi_request_object_value,
+            }
+        ]
+    )
 
     log_message = "logger continues working as normal"
     logger.warning(log_message)
@@ -90,7 +97,9 @@ def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert "doesn't conform to RequestLike. Context not set" in parsed[0].get("exception")
+    assert "doesn't conform to RequestLike. Context not set" in parsed[0].get(
+        "exception"
+    )
     assert parsed[0].get("level") == "error"
 
     assert parsed[1].get("message") == log_message
