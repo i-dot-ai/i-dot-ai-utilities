@@ -97,7 +97,11 @@ def test_log_format_handled_and_uses_console_logger(log_format_value, capsys):
     for line in log_lines:
         parsed.append(line)
 
-    shipping_error_message = "messages cannot be shipped downstream outside of JSON format. Disabling log shipping"
+    shipping_error_message = (
+        "messages cannot be shipped downstream outside of JSON format. "
+        "Disabling log shipping"
+    )
+
     assert shipping_error_message in parsed[0]
     assert test_message in parsed[1]
 

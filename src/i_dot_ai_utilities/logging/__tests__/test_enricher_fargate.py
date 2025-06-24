@@ -12,11 +12,12 @@ from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironme
 
 @pytest.fixture
 def load_test_metadata_object():
+    test_arn = "arn:aws:ecs:us-east-1:123456789012:task/testcluster/testarn"
     return {
         "ImageID": "image12345",
         "StartedAt": "2023-07-21T15:45:44.954460255Z",
         "Labels": {
-            "com.amazonaws.ecs.task-arn": "arn:aws:ecs:us-east-1:123456789012:task/testcluster/testarn",
+            "com.amazonaws.ecs.task-arn": test_arn,
         },
     }
 

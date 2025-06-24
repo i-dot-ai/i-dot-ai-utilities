@@ -29,7 +29,7 @@ class StructuredLogger:
 
     :param level: The logging level. Log messages raised at this urgency or above will be written to stdout. Defaults to 'INFO'. Example values: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
     :param options: A set of LoggerConfigOptions that can be used to modify the logger behaviour.
-    """
+    """  # noqa: E501
 
     _logger: Any
     _default_config: LoggerConfigOptions
@@ -77,7 +77,7 @@ class StructuredLogger:
 
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
-        """
+        """  # noqa: E501
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.debug(message, message_template=message_template, **kwargs)
 
@@ -94,7 +94,7 @@ class StructuredLogger:
 
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
-        """
+        """  # noqa: E501
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.info(message, message_template=message_template, **kwargs)
 
@@ -105,13 +105,15 @@ class StructuredLogger:
 
         Usage Examples
         ----------
-        logger.warning('anonymous user failed to do X action', id=12345) # Log output: {"message": "anonymous user failed to do X action", "id": 12345}
+        logger.warning('anonymous user failed to do X action', id=12345)
+        => Log output: {"message": "anonymous user failed to do X action", "id": 12345}
 
-        logger.warning('User {email} failed to log in due to password mismatch', email='me@example.com') # Log output: {"message": "User me@example.com failed to log in due to password mismatch", "email": "me@example.com"}
+        logger.warning('User {email} failed to log in due to password mismatch', email='me@example.com')
+        => Log output: {"message": "User me@example.com failed to log in due to password mismatch", "email": "me@example.com"}
 
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
-        """
+        """  # noqa: E501
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.warning(message, message_template=message_template, **kwargs)
 
@@ -128,7 +130,7 @@ class StructuredLogger:
 
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
-        """
+        """  # noqa: E501
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.error(message, message_template=message_template, **kwargs)
 
@@ -142,7 +144,7 @@ class StructuredLogger:
         logger.exception('Login flow failed for user', id=12345) # Log output: {"message": "Login flow failed for user", "id": 12345, "exception": "Traceback ..."}
 
         logger.exception('User {email} failed to update in DB', email='me@example.com') # Log output: {"message": User me@example.com failed to update in DB", "email": "me@example.com", "exception": "Traceback ..."}
-        """
+        """  # noqa: E501
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.exception(message, message_template=message_template, **kwargs)
 
@@ -155,7 +157,7 @@ class StructuredLogger:
 
         :param field_key: The key of the field.
         :param field_value: The value of the field.
-        """
+        """  # noqa: E501
         structlog.contextvars.bind_contextvars(**{field_key: field_value})
 
     def refresh_context(
@@ -164,7 +166,7 @@ class StructuredLogger:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
-        """
+        """  # noqa: E501
         structlog.contextvars.clear_contextvars()
         self._upsert_base_context()
 
@@ -192,7 +194,8 @@ class StructuredLogger:
             and selected_option is True
         ):
             self._logger.warning(
-                "Warning(Logger): messages cannot be shipped downstream outside of JSON format. Disabling log shipping"
+                "Warning(Logger): messages cannot be shipped downstream "
+                "outside of JSON format. Disabling log shipping"
             )
             return False
 
@@ -205,7 +208,10 @@ class StructuredLogger:
             return message_template.format(**kwargs)
         except KeyError:
             self._logger.exception(
-                "Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?",
+                (
+                    "Exception(Logger): Variable interpolation failed when formatting "
+                    "log message. Is a value missing?"
+                ),
                 message_template=message_template,
             )
             return message_template

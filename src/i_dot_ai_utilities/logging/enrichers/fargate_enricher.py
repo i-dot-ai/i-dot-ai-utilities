@@ -48,5 +48,8 @@ class FargateContainerMetadataResponse:
                 raw_response["Labels"]
             )
         except Exception as e:
-            msg = "Exception(Logger): Response doesn't conform to FargateContainerMetadataResponse. Context not set."
+            msg = (
+                "Exception(Logger): Response doesn't conform to "
+                "FargateContainerMetadataResponse. Context not set."
+            )
             raise TypeError(msg) from e

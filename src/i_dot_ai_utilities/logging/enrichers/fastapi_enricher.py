@@ -26,5 +26,8 @@ class FastApiEnricher:
 
     def _validate_object_instance(self, request: RequestLike) -> None:
         if not isinstance(request, RequestLike):
-            msg = "Exception(Logger): Request object doesn't conform to RequestLike. Context not set."
+            msg = (
+                "Exception(Logger): Request object doesn't conform to "
+                "RequestLike. Context not set."
+            )
             raise TypeError(msg)

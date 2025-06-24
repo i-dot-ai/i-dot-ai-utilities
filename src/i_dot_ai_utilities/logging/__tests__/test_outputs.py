@@ -117,9 +117,9 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert (
-        parsed[0].get("message")
-        == "This is a test message. Email: foo@baz.com, ID: 12345. Fields will be interpolated"
+    assert parsed[0].get("message") == (
+        "This is a test message. Email: foo@baz.com, ID: 12345. "
+        "Fields will be interpolated"
     )
     assert parsed[0].get("message_template") == templated_message_string
     assert parsed[0].get("email") == email
@@ -153,9 +153,9 @@ def test_string_interpolation_failure_handled_by_logger(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert (
-        parsed[0].get("message")
-        == "Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?"
+    assert parsed[0].get("message") == (
+        "Exception(Logger): Variable interpolation failed when formatting log "
+        "message. Is a value missing?"
     )
 
     assert parsed[1].get("message") == templated_message_string
