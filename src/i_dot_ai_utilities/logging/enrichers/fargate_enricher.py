@@ -2,6 +2,7 @@ import json
 import os
 from typing import Any
 from urllib import request
+from urllib.parse import urlparse
 
 from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
     ExtractedFargateContext,
@@ -35,7 +36,12 @@ class FargateEnvironmentEnricher:
             msg = "Failed to find metadata URL on environment"
             raise ValueError(msg)
 
-        with request.urlopen(url) as response:  # noqa: S310
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in ("http", "https"):
+            msg = "URL must use HTTP or HTTPS"
+            raise ValueError(msg)
+
+        with request.urlopen(url) as response:  # noqa: S310 # nosec B310
             return json.loads(response.read())
 
 
