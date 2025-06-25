@@ -33,7 +33,14 @@ jobs:
     - name: Build
       run: uv build
 
-    - name: Set release version
+    - name: Set test release version
+      if: github.event.release.prerelease == 'true'
+      run: |
+        timestamp=$(date +"%Y%m%d%H%M")
+        uv version ${{ github.event.release.tag_name }}-rc.$timestamp
+
+    - name: Set prod release version
+      if: github.event.release.prerelease == 'false'
       run: uv version ${{ github.event.release.tag_name }}
       
     - name: Publish to test pypi
