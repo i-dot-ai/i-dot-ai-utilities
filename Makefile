@@ -3,7 +3,7 @@ test:
 	--cov automatilib --cov-report term-missing --cov-fail-under 88
 
 lint:
-	poetry run ruff check
-	poetry run ruff format --check
-	poetry run mypy src/i-dot-ai-utilities/ --ignore-missing-imports
-	poetry run bandit -ll -r src/i-dot-ai-utilities
+	uv run ruff check
+	uv run ruff format --check
+	uv run mypy src/i_dot_ai_utilities/ --ignore-missing-imports
+	uv run bandit -ll -r src/i_dot_ai_utilities
