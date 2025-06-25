@@ -34,24 +34,24 @@ jobs:
       run: uv build
 
     - name: Set test release version
-      if: github.event.release.prerelease == 'true'
+      if: github.event.release.prerelease == true
       run: |
         timestamp=$(date +"%Y%m%d%H%M")
         uv version ${{ github.event.release.tag_name }}-rc.$timestamp
 
     - name: Set prod release version
-      if: github.event.release.prerelease == 'false'
+      if: github.event.release.prerelease == false
       run: uv version ${{ github.event.release.tag_name }}
       
     - name: Publish to test pypi
       uses: pypa/gh-action-pypi-publish@release/v1
-      if: github.event.release.prerelease == 'true'
+      if: github.event.release.prerelease == true
       with:
         repository-url: 'https://test.pypi.org/legacy/'
 
     - name: Publish to prod pypi
       uses: pypa/gh-action-pypi-publish@release/v1
-      if: github.event.release.prerelease == 'false'
+      if: github.event.release.prerelease == false
 
   determine-success:
     if: always()
