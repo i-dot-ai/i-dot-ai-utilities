@@ -41,7 +41,7 @@ class FargateEnvironmentEnricher:
             msg = "URL must use HTTP or HTTPS"
             raise ValueError(msg)
 
-        with request.urlopen(url) as response:  # noqa: S310 # nosec B310
+        with request.urlopen(parsed_url.geturl()) as response:  # noqa: S310 # nosec B310
             return json.loads(response.read())
 
 
