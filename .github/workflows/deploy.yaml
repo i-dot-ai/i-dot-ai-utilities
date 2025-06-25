@@ -48,6 +48,7 @@ jobs:
       if: github.event.release.prerelease == true
       with:
         repository-url: 'https://test.pypi.org/legacy/'
+        verbose: true
 
     - name: Publish to prod pypi
       uses: pypa/gh-action-pypi-publish@release/v1
