@@ -78,7 +78,7 @@ jobs:
       - determine-success
     with:
       WORKFLOW_PASSED: ${{ needs.determine-success.outputs.success == 'true' }}
-      SUCCESS_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":airplane: ${{ github.repository }} - Successfully deployed ${{ github.event.release.tag_name }}:large_green_circle:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Package published to PyPI successfully\"}}]}"
-      FAILURE_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":x: ${{ github.repository }} - Failed to deploy ${{ github.event.release.tag_name }} :x:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Failed to publish package to PyPI\"}}]}"
+      SUCCESS_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":airplane: ${{ github.repository }} - Successfully deployed ${{ github.event.release.tag_name }}${{ github.event.release.prerelease && ' (Pre-Release)' || '' }} :large_green_circle:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Package published to PyPI successfully\"}}]}"
+      FAILURE_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":x: ${{ github.repository }} - Failed to deploy ${{ github.event.release.tag_name }}${{ github.event.release.prerelease && ' (Pre-Release)' || '' }} :x:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Failed to publish package to PyPI\"}}]}"
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
