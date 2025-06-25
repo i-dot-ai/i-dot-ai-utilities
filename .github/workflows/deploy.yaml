@@ -31,7 +31,7 @@ jobs:
       if: github.event.release.prerelease == true
       run: |
         timestamp=$(date +"%Y%m%d%H%M")
-        uv version ${{ github.event.release.tag_name }}-rc.$timestamp
+        uv version ${{ github.event.release.tag_name }}.$timestamp
 
     - name: Set prod release version
       if: github.event.release.prerelease == false
