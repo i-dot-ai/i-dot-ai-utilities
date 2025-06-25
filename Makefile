@@ -1,6 +1,10 @@
 test:
+	PACKAGE_DIRS="logging"; \
+	for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
-	--cov src/i_dot_ai_utilities --cov-report term-missing --cov-fail-under 88
+		src/i_dot_ai_utilities/$$dir \
+		--cov src/i_dot_ai_utilities/$$dir --cov-report term-missing --cov-fail-under 88 || exit 1; \
+	done
 
 lint:
 	uv run ruff check
