@@ -5,12 +5,6 @@ env:
 
 on:
   push:
-    branches:
-      - 'main'
-      - 'feature/**'
-      - 'bugfix/**'
-      - 'hotfix/**'
-      - 'develop'
 
 jobs:
   check_web:
@@ -35,3 +29,6 @@ jobs:
 
     - name: Run lint
       run: uv run make lint
+
+    - name: Run unit tests
+      run: uv run make test
