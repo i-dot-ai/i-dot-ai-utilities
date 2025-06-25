@@ -17,7 +17,7 @@ from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
     ExtractedFargateContext,
 )
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
-from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptionValue, LoggerConfigOptions
+from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
@@ -55,10 +55,12 @@ class StructuredLogger:
         if not options:
             options = self._default_config
 
-        self._execution_environment = self._get_option(options, "execution_environment")
+        self._execution_environment = options.get(
+            "execution_environment", self._default_config["execution_environment"]
+        )
         self._enricher_provider = EnrichmentProvider(self._execution_environment)
 
-        self._log_format = self._get_option(options, "log_format")
+        self._log_format = options.get("log_format", self._default_config["log_format"])
         self._ship_logs = self._should_ship_logs(options)
 
         ProcessorHelper().configure_processors(
@@ -190,13 +192,10 @@ class StructuredLogger:
 
         structlog.contextvars.bind_contextvars(**additional_context)
 
-    def _get_option(self, options_dict: LoggerConfigOptions, selected_option: str) -> LoggerConfigOptionValue:
-        return options_dict.get(selected_option, self._default_config[selected_option])
-
     def _should_ship_logs(self, options: LoggerConfigOptions) -> bool:
-        selected_option = self._get_option(options, "ship_logs")
+        selected_option = options.get("ship_logs", self._default_config["ship_logs"])
         if (
-            self._get_option(options, "log_format")
+            options.get("log_format", self._default_config["log_format"])
             is not LogOutputFormat.JSON
             and selected_option is True
         ):
