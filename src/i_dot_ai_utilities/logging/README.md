@@ -39,7 +39,7 @@ logger = StructuredLogger(level='info', options={
 
 ### Creating Log Messages
 Once the logger is initialised, you can create log messages in different ways depending on your requirement. 
-For example, you can create simple messages with string literals:
+For example, you can create simple messages with string-literals:
 
 ```
 logger.info("A thing happened")
@@ -54,6 +54,8 @@ You can also format strings so the message field itself contains useful data, wh
 ```
 logger.info("Yet another thing occurred for user {email} with id {id}", email=user_email, id=id)
 ```
+
+It is best practice to NOT to use f-strings in log message creation. Variable interpolation happens within the function itself and allows the library to extract message content correctly so it can be indexed downstream.
 
 <br>
 
