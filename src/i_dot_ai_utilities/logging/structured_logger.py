@@ -43,6 +43,7 @@ class StructuredLogger:
     _enricher_provider: EnrichmentProvider
     _log_format: LogOutputFormat
     _ship_logs: bool
+    _logger_name: str | None = None
 
     def __init__(
         self,
@@ -54,6 +55,8 @@ class StructuredLogger:
             options = self._default_config
 
         self._logger = structlog.get_logger()
+
+        self._logger_name = options.get("logger_name", None)
 
         self._execution_environment = options.get(
             "execution_environment", self._default_config["execution_environment"]
@@ -228,10 +231,18 @@ class StructuredLogger:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
+    def _set_logger_name(self) -> None:
+        if self._logger_name:
+            structlog.contextvars.bind_contextvars(
+                logger_name=self._logger_name,
+            )
+
     def _upsert_base_context(self) -> None:
         self._set_environment_context(
             self._enricher_provider.load_execution_environment_context(self)
         )
+
+        self._set_logger_name()
 
         base_context: BaseContext = {
             "context_id": str(uuid.uuid4()),
