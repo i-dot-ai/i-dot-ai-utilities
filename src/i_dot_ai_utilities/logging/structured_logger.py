@@ -13,6 +13,7 @@ from i_dot_ai_utilities.logging.processor_helper import ProcessorHelper
 from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
+from i_dot_ai_utilities.logging.types.context_fields import ContextFieldValue
 from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
     ExtractedFargateContext,
 )
@@ -73,7 +74,7 @@ class StructuredLogger:
 
         self._upsert_base_context()
 
-    def debug(self, message_template: str, **kwargs: dict[str, Any]) -> None:
+    def debug(self, message_template: str, **kwargs: Any) -> None:
         """Write a debug log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -90,7 +91,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.debug(message, message_template=message_template, **kwargs)
 
-    def info(self, message_template: str, **kwargs: dict[str, Any]) -> None:
+    def info(self, message_template: str, **kwargs: Any) -> None:
         """Write an informational log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -107,7 +108,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.info(message, message_template=message_template, **kwargs)
 
-    def warning(self, message_template: str, **kwargs: dict[str, Any]) -> None:
+    def warning(self, message_template: str, **kwargs: Any) -> None:
         """Write a warning log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -126,7 +127,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.warning(message, message_template=message_template, **kwargs)
 
-    def error(self, message_template: str, **kwargs: dict[str, Any]) -> None:
+    def error(self, message_template: str, **kwargs: Any) -> None:
         """Write an error log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -143,7 +144,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.error(message, message_template=message_template, **kwargs)
 
-    def exception(self, message_template: str, **kwargs: dict[str, Any]) -> None:
+    def exception(self, message_template: str, **kwargs: Any) -> None:
         """Write a caught exception, along with an error log message. Caught exceptions will automatically be added as context to the log message.
 
         Log messages may be string-literals, or be formatted strings. Formatted strings will have any interpolated values added as context fields to the log message.
@@ -157,7 +158,7 @@ class StructuredLogger:
         message = self._get_interpolated_message(message_template, **kwargs)
         self._logger.exception(message, message_template=message_template, **kwargs)
 
-    def set_context_field(self, field_key: str, field_value: str | int | bool) -> None:
+    def set_context_field(self, field_key: str, field_value: ContextFieldValue) -> None:
         """Add a custom field to the logger dictionary. This field will appear on subsequent log messages.
 
         This key and value will be made available as a searchable field in the downstream logging stack.
@@ -210,9 +211,7 @@ class StructuredLogger:
 
         return selected_option
 
-    def _get_interpolated_message(
-        self, message_template: str, **kwargs: dict[str, Any]
-    ) -> str:
+    def _get_interpolated_message(self, message_template: str, **kwargs: Any) -> str:
         try:
             return message_template.format(**kwargs)
         except KeyError:
