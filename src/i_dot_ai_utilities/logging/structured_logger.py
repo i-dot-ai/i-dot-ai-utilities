@@ -49,11 +49,11 @@ class StructuredLogger:
         level: str | int = logging.INFO,
         options: LoggerConfigOptions | None = None,
     ):
-        self._logger = structlog.get_logger()
-
         self._default_config = self._load_config_defaults()
         if not options:
             options = self._default_config
+
+        self._logger = structlog.get_logger()
 
         self._execution_environment = options.get(
             "execution_environment", self._default_config["execution_environment"]
