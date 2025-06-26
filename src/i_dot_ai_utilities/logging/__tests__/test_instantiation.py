@@ -159,3 +159,26 @@ def test_incorrect_log_level_handled(capsys):
 
     assert parsed[1].get("message") == test_message
     assert parsed[2].get("message") == second_test_message
+
+
+def test_log_name_set(capsys):
+    logger = StructuredLogger(
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+            "logger_name": __name__,
+        },
+    )
+
+    logger.info("test message")
+    logger.refresh_context()
+    logger.info("with refreshed context")
+
+    captured = capsys.readouterr()
+    log_lines = captured.out.strip().splitlines()
+
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    assert parsed[0].get("logger_name") == __name__
+    assert parsed[1].get("logger_name") == __name__

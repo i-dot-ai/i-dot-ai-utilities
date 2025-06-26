@@ -1,1 +1,6 @@
-__all__ = ["ContextEnrichmentType", "ExecutionEnvironmentType", "StructuredLogger"]
+__all__ = [
+    "ContextEnrichmentType",
+    "ExecutionEnvironmentType",
+    "LogOutputFormat",
+    "StructuredLogger",
+]
