@@ -1,6 +1,8 @@
+from collections.abc import Sequence
+
 ContextFieldPrimitives = str | int | bool | float
 ContextFieldValue = (
     ContextFieldPrimitives
-    | list[ContextFieldPrimitives]
+    | Sequence[ContextFieldPrimitives]
     | dict[str, ContextFieldPrimitives]
 )
