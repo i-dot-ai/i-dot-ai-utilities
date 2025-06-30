@@ -13,7 +13,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
     """Create a new CloudWatch Metrics Writer.
 
     Metrics are logged to stdout in the Embedded Metrics Format, which are automatically registered as time-series metrics by CloudWatch Logs.
-    
+
     :param namespace: The namespace in CloudWatch in which to store all metrics. Usually the service/repo name, or some other app identifier.
     """  # noqa: E501
 
