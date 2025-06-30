@@ -1,9 +1,12 @@
 import json
 import sys
 import time
-from typing import Dict
+
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
-from i_dot_ai_utilities.metrics.types.embedded_metric_format import EmbeddedMetricFormat, StorageResolution
+from i_dot_ai_utilities.metrics.types.embedded_metric_format import (
+    EmbeddedMetricFormat,
+    StorageResolution,
+)
 
 
 class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
@@ -13,8 +16,8 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
     def put_metric(
             self,
             metric_name: str,
-            value: int | float,
-            dimensions: Dict | None = None,
+            value: float,
+            dimensions: dict | None = None,
             unit: str = "Count",
         ) -> None:
         try:
@@ -24,18 +27,18 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
 
     def _put_metric_internal(self,
             metric_name: str,
-            value: int | float,
-            dimensions: Dict | None = None,
+            value: float,
+            dimensions: dict | None = None,
             unit: str = "Count",
         ) -> None:
             if not metric_name or not value:
-                raise ValueError('Missing required parameter')
-            
-            if (type(metric_name) is not str 
+                raise ValueError("Missing required parameter")
+
+            if (type(metric_name) is not str
                     or type(value) not in [int, float]
                     or type(unit) is not str
                     ):
-                raise ValueError('Incorrect parameter type')
+                raise ValueError("Incorrect parameter type")
 
             dimensions = dimensions or {}
             dimension_names = list(dimensions.keys()) if dimensions else []

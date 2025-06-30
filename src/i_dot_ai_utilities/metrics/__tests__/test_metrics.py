@@ -3,6 +3,7 @@
 import json
 
 import pytest
+
 from i_dot_ai_utilities.metrics.cloudwatch_emf import CloudwatchEmbeddedMetricsWriter
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 
@@ -36,9 +37,9 @@ def test_simple_metric(capsys, metrics_writer):
 
     metric_block = cloudwatch_metrics_block[0].get("Metrics")
     assert len(metric_block) == 1
-    assert metric_block[0].get('Name') == metric_name
-    assert metric_block[0].get('Unit') == "Count"
-    assert metric_block[0].get('StorageResolution') == 60
+    assert metric_block[0].get("Name") == metric_name
+    assert metric_block[0].get("Unit") == "Count"
+    assert metric_block[0].get("StorageResolution") == 60
 
 
 def test_metric_with_dimensions(capsys, metrics_writer):
@@ -105,7 +106,7 @@ def test_metric_with_unit_set(capsys, metrics_writer):
         .get("Metrics")[0]
     )
 
-    assert metric_block.get('Unit') == metric_unit
+    assert metric_block.get("Unit") == metric_unit
 
 
 def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
@@ -145,11 +146,11 @@ def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
     ],
 )
 def test_gracefully_handles_badly_set_field(
-    capsys, 
-    metrics_writer, 
-    metric_name, 
-    metric_value, 
-    metric_unit, 
+    capsys,
+    metrics_writer,
+    metric_name,
+    metric_value,
+    metric_unit,
     expected_error_message):
     metrics_writer.put_metric(
         metric_name=metric_name,

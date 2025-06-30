@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TypedDict, List, Optional, Union
+from typing import TypedDict
 
 
 class StorageResolution(Enum):
@@ -10,18 +10,18 @@ class StorageResolution(Enum):
 class MetricDefinition(TypedDict):
     Name: str
     Unit: str
-    StorageResolution: Optional[Union[StorageResolution | int]]
+    StorageResolution: StorageResolution | int | None
 
 
 class CloudWatchMetricBlock(TypedDict):
     Namespace: str
-    Dimensions: List[List[str]]
-    Metrics: List[MetricDefinition]
+    Dimensions: list[list[str]]
+    Metrics: list[MetricDefinition]
 
 
 class AWSBlock(TypedDict):
     Timestamp: int
-    CloudWatchMetrics: List[CloudWatchMetricBlock]
+    CloudWatchMetrics: list[CloudWatchMetricBlock]
 
 
 class EmbeddedMetricFormat(TypedDict):
