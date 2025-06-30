@@ -56,6 +56,9 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint]
 # Dribble in those we have commented out, asterisked ones first
 select = [
