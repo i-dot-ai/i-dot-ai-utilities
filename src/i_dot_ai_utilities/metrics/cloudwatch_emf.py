@@ -10,6 +10,13 @@ from i_dot_ai_utilities.metrics.types.embedded_metric_format import (
 
 
 class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
+    """Create a new CloudWatch Metrics Writer.
+
+    Metrics are logged to stdout in the Embedded Metrics Format, which are automatically registered as time-series metrics by CloudWatch Logs.
+    
+    :param namespace: The namespace in CloudWatch in which to store all metrics. Usually the service/repo name, or some other app identifier.
+    """  # noqa: E501
+
     def __init__(self, namespace: str):
         self.namespace = namespace
 
@@ -20,6 +27,15 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         dimensions: dict | None = None,
         unit: str = "Count",
     ) -> None:
+        """Put a time-series metric to CloudWatch.
+
+        See the i.AI utils readme for full details on usage.
+
+        :param metric_name: The name of the metric to log.
+        :param value: The numerical metric value.
+        :param dimensions: A k/v set of **low-cardinality** dimensions to add to the metric for graphing purposes.
+        :param unit: The metric's unit, for example 'count', 'milliseconds', etc.
+        """  # noqa: E501
         try:
             self._put_metric_internal(metric_name, value, dimensions, unit)
         except Exception as e:  # noqa: BLE001
