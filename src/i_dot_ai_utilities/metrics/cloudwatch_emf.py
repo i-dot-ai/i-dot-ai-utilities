@@ -17,7 +17,26 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
             dimensions: Dict | None = None,
             unit: str = "Count",
         ) -> None:
+        try:
+            self._put_metric_internal(metric_name, value, dimensions, unit)
+        except Exception as e:
+            print(f"Failed to write metric: {e}")
+
+    def _put_metric_internal(self,
+            metric_name: str,
+            value: int | float,
+            dimensions: Dict | None = None,
+            unit: str = "Count",
+        ) -> None:
+            if not metric_name or not value:
+                raise ValueError('Missing required parameter')
             
+            if (type(metric_name) is not str 
+                    or type(value) not in [int, float]
+                    or type(unit) is not str
+                    ):
+                raise ValueError('Incorrect parameter type')
+
             dimensions = dimensions or {}
             dimension_names = list(dimensions.keys()) if dimensions else []
 
