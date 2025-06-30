@@ -12,7 +12,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
 
     def put_metric(
             self,
-            name: str,
+            metric_name: str,
             value: int | float,
             dimensions: Dict | None = None,
             unit: str = "Count",
@@ -29,9 +29,9 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
                             "Namespace": self.namespace,
                             "Dimensions": [dimension_names] if dimension_names else [],
                             "Metrics": [{
-                                "Name": name,
+                                "Name": metric_name,
                                 "Unit": unit,
-                                "StorageResolution": StorageResolution.STANDARD,
+                                "StorageResolution": StorageResolution.STANDARD.value,
                             }]
                         }
                     ]
@@ -41,7 +41,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
 
             metric_payload = {
                 **emf,
-                name: value
+                metric_name: value
             }
 
             print(json.dumps(metric_payload), file=sys.stdout)

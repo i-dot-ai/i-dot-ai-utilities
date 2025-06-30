@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Union
 
 
 class StorageResolution(Enum):
@@ -10,7 +10,7 @@ class StorageResolution(Enum):
 class MetricDefinition(TypedDict):
     Name: str
     Unit: str
-    StorageResolution: Optional[StorageResolution]
+    StorageResolution: Optional[Union[StorageResolution | int]]
 
 
 class CloudWatchMetricBlock(TypedDict):
