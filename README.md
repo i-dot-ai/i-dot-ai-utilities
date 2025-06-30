@@ -36,6 +36,35 @@ This is where some of the above can be found:
 
 ## How to use
 
+### Unit Testing
+
+It's important that packages include robust test suites. As well as the usual benefit of providing the confidence and ability to make rapid change without causing a regression, it's especially important here as the code in this repository will be used ubiquitously across our many applications. 
+
+Tests and linting runs on every push and merge to main. These must pass before merging as failing tests will impact every package in the application.
+
+Tests must run in isolation for the same reason, as failures of external dependencies will impact the CI tests for all packages.
+
+### CI/CD & Releases
+
+Releases must be manually created, after which the specified package version will be released to PyPI. As such, release names must adhere to semantic versioning. They must *not* be prefixed with a `v`.
+
+You may release a pre-release tag to the test version of PyPI by specifying the release as a pre-release on creation. This allows for the testing of a tag in a safe environment before merging to main.
+
+To test a pre-release tag, you can follow these steps in a repo of your choice:
+1. Update pyproject.toml:
+```
+[[tool.poetry.source]]
+name = "test-pypi"
+url = "https://test.pypi.org/simple/"
+priority = "supplemental"
+```
+2. Load the specific version into the environment (replacing version number as required)
+```
+poetry add --source test-pypi i-dot-ai-utilities==0.1.1rc202506301522
+```
+
+
+
 ## Licence
 
 MIT
