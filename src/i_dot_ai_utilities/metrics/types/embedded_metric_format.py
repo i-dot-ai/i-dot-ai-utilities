@@ -10,7 +10,7 @@ class StorageResolution(Enum):
 class MetricDefinition(TypedDict):
     Name: str
     Unit: str
-    StorageResolution: StorageResolution | int | None
+    StorageResolution: StorageResolution | int
 
 
 class CloudWatchMetricBlock(TypedDict):
