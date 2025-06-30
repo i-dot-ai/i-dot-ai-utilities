@@ -15,10 +15,12 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
     Metrics are logged to stdout in the Embedded Metrics Format, which are automatically registered as time-series metrics by CloudWatch Logs.
 
     :param namespace: The namespace in CloudWatch in which to store all metrics. Usually the service/repo name, or some other app identifier.
+    :param environment: The environment in which the code is running (e.g. dev/preprod/prod).
     """  # noqa: E501
 
-    def __init__(self, namespace: str):
+    def __init__(self, namespace: str, environment: str = "unknown"):
         self.namespace = namespace
+        self.environment = environment
 
     def put_metric(
         self,
@@ -68,7 +70,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
                 "Timestamp": int(time.time() * 1000),
                 "CloudWatchMetrics": [
                     {
-                        "Namespace": self.namespace,
+                        "Namespace": self.namespace + "/" + self.environment,
                         "Dimensions": [dimension_names] if dimension_names else [],
                         "Metrics": [
                             {

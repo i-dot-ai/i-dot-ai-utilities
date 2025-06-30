@@ -10,7 +10,7 @@ from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 
 @pytest.fixture
 def metrics_writer() -> MetricsWriter:
-    return CloudwatchEmbeddedMetricsWriter("test_namespace")
+    return CloudwatchEmbeddedMetricsWriter("test_namespace", "test_environment")
 
 
 def test_simple_metric(capsys, metrics_writer):
@@ -32,7 +32,10 @@ def test_simple_metric(capsys, metrics_writer):
 
     cloudwatch_metrics_block = logged_metric.get("_aws").get("CloudWatchMetrics")
     assert len(cloudwatch_metrics_block) == 1
-    assert cloudwatch_metrics_block[0].get("Namespace") == "test_namespace"
+    assert (
+        cloudwatch_metrics_block[0].get("Namespace")
+        == "test_namespace/test_environment"
+    )
     assert cloudwatch_metrics_block[0].get("Dimensions", None) == []
 
     metric_block = cloudwatch_metrics_block[0].get("Metrics")
