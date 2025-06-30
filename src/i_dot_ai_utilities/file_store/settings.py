@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = Field(default="minioadmin")
     data_dir: str = Field(default="app_data")
 
-    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_S3_")
+    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_")
 
     def boto3_client(self) -> boto3.client:
         """
