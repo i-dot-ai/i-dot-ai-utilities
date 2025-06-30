@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from i_dot_ai_utilities.metrics.cloudwatch_emf import CloudwatchEmbeddedMetricsWriter
+from i_dot_ai_utilities.metrics.cloudwatch import CloudwatchEmbeddedMetricsWriter
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 
 
