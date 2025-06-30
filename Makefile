@@ -1,5 +1,5 @@
 test:
-	PACKAGE_DIRS="logging"; \
+	PACKAGE_DIRS="logging metrics"; \
 	for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
