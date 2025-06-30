@@ -18,7 +18,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
     :param environment: The environment in which the code is running (e.g. dev/preprod/prod).
     """  # noqa: E501
 
-    def __init__(self, namespace: str, environment: str = "unknown"):
+    def __init__(self, namespace: str, environment: str):
         self.namespace = namespace
         self.environment = environment
 
