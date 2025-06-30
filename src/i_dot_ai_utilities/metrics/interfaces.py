@@ -8,6 +8,5 @@ class MetricsWriter(ABC):
         metric_name: str,
         value: float,
         dimensions: dict | None,
-        unit: str = "Count",
     ) -> None:
         pass

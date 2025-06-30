@@ -79,33 +79,6 @@ def test_metric_with_dimensions(capsys, metrics_writer):
     assert dimension_names[1] == "dim2"
 
 
-def test_metric_with_unit_set(capsys, metrics_writer):
-    metric_name = "test_metric_with_unit_set"
-    metric_value = 4.5
-    metric_unit = "test_unit"
-
-    metrics_writer.put_metric(
-        metric_name=metric_name,
-        value=metric_value,
-        unit=metric_unit,
-    )
-
-    captured = capsys.readouterr()
-    log_lines = captured.out.strip().splitlines()
-
-    parsed = []
-    for line in log_lines:
-        parsed.append(json.loads(line))
-
-    logged_metric = parsed[0]
-
-    metric_block = (
-        logged_metric.get("_aws").get("CloudWatchMetrics")[0].get("Metrics")[0]
-    )
-
-    assert metric_block.get("Unit") == metric_unit
-
-
 def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
     metric_name = "test_gracefully_handles_badly_set_dimension"
 
@@ -124,13 +97,12 @@ def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
 
 
 @pytest.mark.parametrize(
-    ("metric_name", "metric_value", "metric_unit", "expected_error_message"),
+    ("metric_name", "metric_value", "expected_error_message"),
     [
-        (None, 1, "Count", "Missing required parameter"),
-        ("test_metric", None, "Count", "Missing required parameter"),
-        (-99, 1, "Count", "Incorrect parameter type"),
-        ("test_metric", "broken_value", "Count", "Incorrect parameter type"),
-        ("test_metric", 1, -99, "Incorrect parameter type"),
+        (None, 1, "Missing required parameter"),
+        ("test_metric", None, "Missing required parameter"),
+        (-99, 1, "Incorrect parameter type"),
+        ("test_metric", "broken_value", "Incorrect parameter type"),
     ],
 )
 def test_gracefully_handles_badly_set_field(
@@ -138,13 +110,11 @@ def test_gracefully_handles_badly_set_field(
     metrics_writer,
     metric_name,
     metric_value,
-    metric_unit,
     expected_error_message,
 ):
     metrics_writer.put_metric(
         metric_name=metric_name,
         value=metric_value,
-        unit=metric_unit,
     )
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()

@@ -27,7 +27,6 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         metric_name: str,
         value: float,
         dimensions: dict | None = None,
-        unit: str = "Count",
     ) -> None:
         """Put a time-series metric to CloudWatch.
 
@@ -36,29 +35,20 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         :param metric_name: The name of the metric to log.
         :param value: The numerical metric value.
         :param dimensions: A k/v set of **low-cardinality** dimensions to add to the metric for graphing purposes.
-        :param unit: The metric's unit, for example 'count', 'milliseconds', etc.
         """  # noqa: E501
         try:
-            self._put_metric_internal(metric_name, value, dimensions, unit)
+            self._put_metric_internal(metric_name, value, dimensions)
         except Exception as e:  # noqa: BLE001
             print(f"Failed to write metric: {e}")  # noqa: T201
 
     def _put_metric_internal(
-        self,
-        metric_name: str,
-        value: float,
-        dimensions: dict | None = None,
-        unit: str = "Count",
+        self, metric_name: str, value: float, dimensions: dict | None = None
     ) -> None:
         if not metric_name or not value:
             msg = "Missing required parameter"
             raise ValueError(msg)
 
-        if (
-            type(metric_name) is not str
-            or type(value) not in [int, float]
-            or type(unit) is not str
-        ):
+        if type(metric_name) is not str or type(value) not in [int, float]:
             msg = "Incorrect parameter type"
             raise ValueError(msg)
 
@@ -75,7 +65,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
                         "Metrics": [
                             {
                                 "Name": metric_name,
-                                "Unit": unit,
+                                "Unit": "Count",
                                 "StorageResolution": StorageResolution.STANDARD.value,
                             }
                         ],
