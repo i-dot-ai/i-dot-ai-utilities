@@ -7,6 +7,6 @@ class MetricsWriter(ABC):
         self,
         metric_name: str,
         value: float,
-        dimensions: dict | None,
+        dimensions: dict | None = None,
     ) -> None:
         pass
