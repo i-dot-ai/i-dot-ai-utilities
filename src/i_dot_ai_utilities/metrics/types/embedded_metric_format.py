@@ -3,6 +3,12 @@ from typing import TypedDict
 
 
 class StorageResolution(Enum):
+    """Sets the resolution at which metrics are stored in CloudWatch.
+
+    :Standard: Graphing available at 60-second granularity (per-minute datapoints)
+    :High: Stored at 1-second granularity (per-second datapoints)
+    """
+
     STANDARD = 60
     HIGH = 1
 
