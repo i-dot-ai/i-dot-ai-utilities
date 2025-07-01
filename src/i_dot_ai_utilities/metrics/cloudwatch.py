@@ -2,6 +2,7 @@ import json
 import sys
 import time
 
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 from i_dot_ai_utilities.metrics.types.embedded_metric_format import (
     EmbeddedMetricFormat,
@@ -16,11 +17,13 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
 
     :param namespace: The namespace in CloudWatch in which to store all metrics. Usually the service/repo name, or some other app identifier.
     :param environment: The environment in which the code is running (e.g. dev/preprod/prod).
+    :param logger: A Structured Logger used to emit messages on write failures.
     """  # noqa: E501
 
-    def __init__(self, namespace: str, environment: str):
+    def __init__(self, namespace: str, environment: str, logger: StructuredLogger):
         self.namespace = namespace
         self.environment = environment
+        self._logger = logger
 
     def put_metric(
         self,
@@ -38,8 +41,8 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         """  # noqa: E501
         try:
             self._put_metric_internal(metric_name, value, dimensions)
-        except Exception as e:  # noqa: BLE001
-            print(f"Failed to write metric: {e}")  # noqa: T201
+        except Exception:
+            self._logger.exception("Failed to write metric")
 
     def _put_metric_internal(
         self, metric_name: str, value: float, dimensions: dict | None = None

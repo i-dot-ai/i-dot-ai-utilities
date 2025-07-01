@@ -4,13 +4,21 @@ import json
 
 import pytest
 
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
+from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.metrics.cloudwatch import CloudwatchEmbeddedMetricsWriter
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 
 
 @pytest.fixture
 def metrics_writer() -> MetricsWriter:
-    return CloudwatchEmbeddedMetricsWriter("test_namespace", "test_environment")
+    return CloudwatchEmbeddedMetricsWriter(
+        namespace="test_namespace",
+        environment="test_environment",
+        logger=StructuredLogger(
+            options={"execution_environment": ExecutionEnvironmentType.LOCAL},
+        ),
+    )
 
 
 def test_simple_metric(capsys, metrics_writer):
@@ -92,7 +100,11 @@ def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
 
-    assert ("Failed to write metric") in log_lines[0]
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    assert parsed[0].get("message") == "Failed to write metric"
     assert json.loads(log_lines[1]).get("this") == "succeeds"
 
 
@@ -119,5 +131,9 @@ def test_gracefully_handles_badly_set_field(
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()
 
-    assert ("Failed to write metric") in log_lines[0]
-    assert (expected_error_message) in log_lines[0]
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    assert parsed[0].get("message") == "Failed to write metric"
+    assert (expected_error_message) in parsed[0].get("exception")
