@@ -28,6 +28,7 @@ classifiers = [
 
 dependencies = [
     "boto3>=1.38.35",
+    "minio>=7.2.15",
     "pydantic-settings>=2.9.1",
     "requests>=2.32.3",
     "structlog>=25.4.0",
@@ -43,11 +44,6 @@ dev = [
     "ruff>=0.11.7",
     "mypy>=1.15.0",
 ]
-
-# [tool.pytest.ini_options]
-# testpaths = ["tests"]
-# python_files = "test_*.py"
-# python_functions = "test_*"
 
 [tool.mypy]
 python_version = "3.12"

@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING, BinaryIO
 if TYPE_CHECKING:
     import boto3
 from botocore.exceptions import ClientError
-from settings import Settings
 
-from src.i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from src.i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
-from src.i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
+from i_dot_ai_utilities.file_store.settings import Settings
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
+from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
+from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
 settings = Settings()
 
@@ -31,7 +31,7 @@ class FileStore:
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize FileStore with boto3 client from settings
         """
@@ -131,7 +131,6 @@ class FileStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        key = self.__prefix_key(key)
         return self.create_object(key, data, metadata, content_type)
 
     def delete_object(self, key: str) -> bool:
@@ -188,13 +187,19 @@ class FileStore:
             str: S3 object pre-signed URL as string. If error, returns None
         """
         bucket = settings.bucket_name
-        key = self.__prefix_key(key)
         try:
-            return self.client.create_presigned_url(Bucket=bucket, Key=key, expiration=expiration)
+            does_object_exist = self.object_exists(key)
+            if not does_object_exist:
+                return None
+            return self.client.generate_presigned_url(
+                "get_object", Params={"Bucket": bucket, "Key": self.__prefix_key(key)}, ExpiresIn=expiration
+            )
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "404":
                 return None
-            logger.exception("Error checking object existence {key}: {exception}", key=key, exception=exception)
+            logger.exception(
+                "Error checking object existence {key}: {exception}", key=self.__prefix_key(key), exception=exception
+            )
             return None
 
     def list_objects(self, prefix: str = "", max_keys: int = 1000) -> list[dict[str, str | int]]:
@@ -312,7 +317,6 @@ class FileStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        key = self.__prefix_key(key)
         try:
             json_data = json.dumps(data, indent=2)
             return self.create_object(
@@ -338,8 +342,6 @@ class FileStore:
         Returns:
             Parsed JSON data (dict or list) or None if not found/invalid
         """
-        key = self.__prefix_key(key)
-
         content = self.read_object(key, as_text=True)
         if content is None:
             return None

@@ -8,18 +8,18 @@ class Settings(BaseSettings):
     """
     All environment settings required here are for S3 access.
 
-    All environment settings except for `environment` should be prefixed with `IAI_S3_`
+    All environment settings except for `environment` should be prefixed with `IAI_FS_`
 
     The following environment variables are expected:
 
     - **ENVIRONMENT**: Accepted values are `local`, `test`, `dev`, `preprod`, and `prod`
-    - **IAI_S3_BUCKET_NAME**: The name of the bucket to interact with
-    - **IAI_S3_AWS_REGION**: The AWS region to interact with
+    - **IAI_FS_BUCKET_NAME**: The name of the bucket to interact with
+    - **IAI_FS_AWS_REGION**: The AWS region to interact with
     - **IAI_MINIO_ADDRESS**: The minio host address (for localhost,
     only needs setting if not using the default `localhost` minio address)
-    - **IAI_S3_AWS_ACCESS_KEY_ID**: The AWS access key ID (for localhost,
+    - **IAI_FS_AWS_ACCESS_KEY_ID**: The AWS access key ID (for localhost,
     only needs setting if not using the default minio credentials)
-    - **IAI_S3_AWS_SECRET_ACCESS_KEY**: The AWS secret key (for localhost,
+    - **IAI_FS_AWS_SECRET_ACCESS_KEY**: The AWS secret key (for localhost,
     only needs setting if not using the default minio credentials)
     - **IAI_DATA_DIR**: The data directory to use inside the set S3 bucket
     (defaults to `app_data`)

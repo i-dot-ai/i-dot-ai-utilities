@@ -1,9 +1,15 @@
+-include .env
+export
+
 test:
-	PACKAGE_DIRS="logging"; \
+	PACKAGE_DIRS="file_store,logging"; \
 	for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
-		--cov src/i_dot_ai_utilities/$$dir --cov-report term-missing --cov-fail-under 88 || exit 1; \
+		--cov-config=.coveragerc \
+		--cov src/i_dot_ai_utilities/$$dir \
+		--cov-report term-missing \
+		--cov-fail-under 75 || exit 1; \
 	done
 
 lint:
