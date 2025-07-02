@@ -75,7 +75,7 @@ def login():
     except Exception:
         # an unhandled exception occurred
         metrics.put_metric(
-            name="unhandled_login_error"
+            name="unhandled_login_errors"
             value=1
         )
 ```
