@@ -38,11 +38,11 @@ This is where some of the above can be found:
 
 ### Unit Testing
 
-It's important that packages include robust test suites. As well as the usual benefit of providing the confidence and ability to make rapid change without causing a regression, it's especially important here as the code in this repository will be used ubiquitously across our many applications. 
+All modules contained within this repo include robust test suites. You can run tests for all modules in this package using `make test`.
 
-Tests and linting runs on every push and merge to main. These must pass before merging as failing tests will impact every package in the application.
+Tests and linting runs on every push and merge to main.
 
-Tests must run in isolation for the same reason, as failures of external dependencies will impact the CI tests for all packages.
+When making changes or adding tests, please ensure tests run in isolation, as failures of external dependencies will impact the CI tests for all packages. Please also make sure that tests pass before merging, as failing tests will impact every package in the application.
 
 ### CI/CD & Releases
 
