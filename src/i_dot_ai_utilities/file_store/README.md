@@ -38,10 +38,6 @@ application in aws with IAM configured for the execution task
 - `IAI_FS_DATA_DIR: str - default="app_data"`: The directory in S3/minio to store your data,
 this is used to restrict user access to the root of a bucket
 
-This package further uses the bundled logging library within this package. For this, please set the following environment var:
-
-- `APP_NAME: str`: The application name to push the logs under
-
 <br>
 
 ***
