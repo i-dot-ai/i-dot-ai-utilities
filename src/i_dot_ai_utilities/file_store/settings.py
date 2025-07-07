@@ -50,8 +50,6 @@ class Settings(BaseSettings):
                 aws_secret_access_key=self.aws_secret_access_key,  # pragma: allowlist secret
                 config=Config(signature_version="s3v4"),
             )
-        elif self.environment.lower() in ["production", "preprod", "dev"]:
+        else:
             session = boto3.Session(self.aws_region)
             return session.client("s3")
-        else:
-            return None
