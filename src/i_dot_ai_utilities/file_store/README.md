@@ -44,6 +44,21 @@ this is used to restrict user access to the root of a bucket
 
 <br>
 
+### Important notes
+
+> Note that errors that occur within the package will return `None` throughout, so null-handling is expected in
+> consuming packages to handle errors.
+
+
+> Also note that all files will be created nested inside the `IAI_FS_DATA_DIR` environment variable, which defaults to
+> `app_data`. This is to support IAM permissions that restrict user/app access to specific dir within a bucket.
+
+<br>
+
+***
+
+<br>
+
 ### Supported functionality
 Once the file store is initialised, you can interact with S3/minio in different ways depending on your requirement.
 The following methods are included, with more properties available:
