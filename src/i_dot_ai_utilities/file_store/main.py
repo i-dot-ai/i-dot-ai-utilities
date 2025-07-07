@@ -7,8 +7,6 @@ from botocore.exceptions import ClientError
 
 from i_dot_ai_utilities.file_store.settings import Settings
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
-from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
 settings = Settings()
 
@@ -18,25 +16,13 @@ class FileStore:
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
     """
 
-    def __init__(self, logger: StructuredLogger | None = None) -> None:
+    def __init__(self, logger: StructuredLogger) -> None:
         """
         Initialize FileStore with boto3 client from settings
+        :param logger: A `StructuredLogger` instance
         """
         self.client: boto3.client = settings.boto3_client()
         self.logger = logger
-        if not logger:
-            logger_environment = (
-                ExecutionEnvironmentType.LOCAL if settings.environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
-            )
-            logger_format = LogOutputFormat.TEXT if settings.environment == "LOCAL" else LogOutputFormat.JSON
-
-            self.logger = StructuredLogger(
-                level="info",
-                options={
-                    "execution_environment": logger_environment,
-                    "log_format": logger_format,
-                },
-            )
 
     @staticmethod
     def __prefix_key(key: str) -> str:
