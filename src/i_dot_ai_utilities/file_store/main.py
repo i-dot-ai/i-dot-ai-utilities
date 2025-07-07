@@ -65,8 +65,8 @@ class FileStore:
 
             self.client.put_object(**put_args)
             self.logger.info("Successfully uploaded object: {key} to bucket: {bucket}", key=key, bucket=bucket)
-        except ClientError as exception:
-            self.logger.exception("Failed to upload object {key}: {exception}", key=key, exception=exception)
+        except ClientError:
+            self.logger.exception("Failed to upload object {key}", key=key)
             return False
         else:
             return True
@@ -92,7 +92,7 @@ class FileStore:
             if exception.response["Error"]["Code"] == "NoSuchKey":
                 self.logger.warning("Object not found: {key}", key=key)
             else:
-                self.logger.exception("Failed to read object {key}: {exception}", key=key, exception=exception)
+                self.logger.exception("Failed to read object {key}", key=key)
             return None
         else:
             if as_text:
@@ -135,8 +135,8 @@ class FileStore:
         try:
             self.client.delete_object(Bucket=bucket, Key=key)
             self.logger.info("Successfully deleted object: {key} from bucket: {bucket}", key=key, bucket=bucket)
-        except ClientError as exception:
-            self.logger.exception("Failed to delete object {key}: {exception}", key=key, exception=exception)
+        except ClientError:
+            self.logger.exception("Failed to delete object {key}", key=key)
             return False
         else:
             return True
@@ -158,7 +158,7 @@ class FileStore:
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "404":
                 return False
-            self.logger.exception("Error checking object {key} existence: {exception}", key=key, exception=exception)
+            self.logger.exception("Error checking object {key} existence", key=key)
             return False
         else:
             return True
@@ -184,9 +184,7 @@ class FileStore:
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "404":
                 return None
-            self.logger.exception(
-                "Error checking object existence {key}: {exception}", key=self.__prefix_key(key), exception=exception
-            )
+            self.logger.exception("Error checking object existence {key}", key=self.__prefix_key(key))
             return None
 
     def list_objects(self, prefix: str = "", max_keys: int = 1000) -> list[dict[str, str | int]]:
@@ -214,10 +212,8 @@ class FileStore:
                         "etag": obj["ETag"].strip('"'),
                     }
                 )
-        except ClientError as exception:
-            self.logger.exception(
-                "Failed to list objects with prefix {prefix}: {exception}", prefix=prefix, exception=exception
-            )
+        except ClientError:
+            self.logger.exception("Failed to list objects with prefix {prefix}", prefix=prefix)
             return []
         else:
             return objects
@@ -251,7 +247,7 @@ class FileStore:
             if exception.response["Error"]["Code"] == "404":
                 self.logger.warning("Object not found: {key}", key=key)
             else:
-                self.logger.exception("Failed to get metadata for {key}: {exception}", key=key, exception=exception)
+                self.logger.exception("Failed to get metadata for {key}", key=key)
             return None
 
     def copy_object(
@@ -275,12 +271,11 @@ class FileStore:
         try:
             copy_source = {"Bucket": bucket, "Key": source_key}
             self.client.copy_object(CopySource=copy_source, Bucket=bucket, Key=dest_key)
-        except ClientError as exception:
+        except ClientError:
             self.logger.exception(
-                "Failed to copy object {source_key} to {dest_key}: {exception}",
+                "Failed to copy object {source_key} to {dest_key}",
                 source_key=source_key,
                 dest_key=dest_key,
-                exception=exception,
             )
             return False
         else:
@@ -312,8 +307,8 @@ class FileStore:
                 metadata=metadata,
                 content_type="application/json",
             )
-        except (TypeError, ValueError) as exception:
-            self.logger.exception("Failed to serialize data as JSON: {exception}", exception=exception)
+        except (TypeError, ValueError):
+            self.logger.exception("Failed to serialize data as JSON")
             return False
 
     def download_json(
@@ -335,6 +330,6 @@ class FileStore:
 
         try:
             return json.loads(content)
-        except json.JSONDecodeError as exception:
-            self.logger.exception("Failed to parse JSON from {key}: {exception}", key=key, exception=exception)
+        except json.JSONDecodeError:
+            self.logger.exception("Failed to parse JSON from {key}", key=key)
             return None
