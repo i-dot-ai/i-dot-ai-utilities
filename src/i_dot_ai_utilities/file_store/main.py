@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 from i_dot_ai_utilities.file_store.settings import Settings
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]
 
 
 class FileStore:
