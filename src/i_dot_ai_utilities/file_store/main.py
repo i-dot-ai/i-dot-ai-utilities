@@ -58,7 +58,7 @@ class FileStore:
             put_args = {"Bucket": bucket, "Key": key, "Body": data}
 
             if metadata:
-                put_args["Metadata"] = metadata
+                put_args["Metadata"] = metadata  # type: ignore[assignment]
 
             if content_type:
                 put_args["ContentType"] = content_type
@@ -87,7 +87,7 @@ class FileStore:
         key = self.__prefix_key(key)
         try:
             response = self.client.get_object(Bucket=bucket, Key=key)
-            content = response["Body"].read()
+            content: bytes | str | None = response["Body"].read()
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "NoSuchKey":
                 self.logger.warning("Object not found: {key}", key=key)
@@ -95,8 +95,9 @@ class FileStore:
                 self.logger.exception("Failed to read object {key}", key=key)
             return None
         else:
-            if as_text:
-                return content.decode(encoding)
+            if as_text and type(content) is bytes:
+                result: str = content.decode(encoding)
+                return result
             return content
 
     def update_object(
@@ -178,8 +179,10 @@ class FileStore:
             does_object_exist = self.object_exists(key)
             if not does_object_exist:
                 return None
-            return self.client.generate_presigned_url(
-                "get_object", Params={"Bucket": bucket, "Key": self.__prefix_key(key)}, ExpiresIn=expiration
+            return str(
+                self.client.generate_presigned_url(
+                    "get_object", Params={"Bucket": bucket, "Key": self.__prefix_key(key)}, ExpiresIn=expiration
+                )
             )
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "404":
@@ -329,7 +332,7 @@ class FileStore:
             return None
 
         try:
-            return json.loads(content)
+            return json.loads(content)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             self.logger.exception("Failed to parse JSON from {key}", key=key)
             return None

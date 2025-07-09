@@ -38,15 +38,13 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         :param metric_name: The name of the metric to log.
         :param value: The numerical metric value.
         :param dimensions: A k/v set of **low-cardinality** dimensions to add to the metric for graphing purposes.
-        """  # noqa: E501
+        """
         try:
             self._put_metric_internal(metric_name, value, dimensions)
         except Exception:
             self._logger.exception("Failed to write metric")
 
-    def _put_metric_internal(
-        self, metric_name: str, value: float, dimensions: dict | None = None
-    ) -> None:
+    def _put_metric_internal(self, metric_name: str, value: float, dimensions: dict | None = None) -> None:
         if not metric_name or not value:
             msg = "Missing required parameter"
             raise ValueError(msg)
