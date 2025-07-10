@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 from i_dot_ai_utilities.file_store.settings import Settings
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
+
 class FileStore:
     """
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
@@ -18,7 +19,7 @@ class FileStore:
         Initialize FileStore with boto3 client from settings
         :param logger: A `StructuredLogger` instance
         """
-        self.settings = Settings()
+        self.settings = Settings()  # type: ignore[call-arg]
         self.client: boto3.client = self.settings.boto3_client()
         self.logger = logger
 

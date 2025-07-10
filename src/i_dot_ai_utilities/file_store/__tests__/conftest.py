@@ -1,5 +1,5 @@
-from collections.abc import Generator
 import os
+from collections.abc import Generator
 from typing import Any
 
 import boto3
@@ -19,8 +19,9 @@ def set_environment_variables() -> None:
     os.environ["IAI_FS_AWS_REGION"] = "eu-west-2"
     os.environ["IAI_FS_MINIO_ADDRESS"] = "http://localhost:9000"
     os.environ["IAI_FS_AWS_ACCESS_KEY_ID"] = "minioadmin"
-    os.environ["IAI_FS_AWS_SECRET_ACCESS_KEY"] = "minioadmin"
+    os.environ["IAI_FS_AWS_SECRET_ACCESS_KEY"] = "minioadmin"  # noqa: S105
     os.environ["IAI_FS_DATA_DIR"] = "app_data"
+
 
 def define_logger() -> StructuredLogger:
     logger_environment = ExecutionEnvironmentType.LOCAL
@@ -34,13 +35,15 @@ def define_logger() -> StructuredLogger:
         },
     )
 
+
 @pytest.fixture
 def settings() -> Settings:
     set_environment_variables()
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
+
 
 @pytest.fixture
-def file_store(settings: Settings) -> FileStore:
+def file_store() -> FileStore:
     return FileStore(define_logger())
 
 
