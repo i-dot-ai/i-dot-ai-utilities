@@ -2,7 +2,7 @@
 export
 
 test:
-	docker compose -d --wait up minio && \
+	docker compose up -d --wait minio && \
 	PACKAGE_DIRS="logging,metrics,file_store"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
