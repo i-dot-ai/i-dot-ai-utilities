@@ -40,10 +40,7 @@ def test_simple_metric(capsys, metrics_writer):
 
     cloudwatch_metrics_block = logged_metric.get("_aws").get("CloudWatchMetrics")
     assert len(cloudwatch_metrics_block) == 1
-    assert (
-        cloudwatch_metrics_block[0].get("Namespace")
-        == "test_namespace/test_environment"
-    )
+    assert cloudwatch_metrics_block[0].get("Namespace") == "test_namespace/test_environment"
     assert cloudwatch_metrics_block[0].get("Dimensions", None) == []
 
     metric_block = cloudwatch_metrics_block[0].get("Metrics")
@@ -78,9 +75,7 @@ def test_metric_with_dimensions(capsys, metrics_writer):
     assert logged_metric.get("dim1") == "res1"
     assert logged_metric.get("dim2") == "res2"
 
-    dimension_names = (
-        logged_metric.get("_aws").get("CloudWatchMetrics")[0].get("Dimensions")[0]
-    )
+    dimension_names = logged_metric.get("_aws").get("CloudWatchMetrics")[0].get("Dimensions")[0]
 
     assert len(dimension_names) == 2
     assert dimension_names[0] == "dim1"
@@ -90,12 +85,8 @@ def test_metric_with_dimensions(capsys, metrics_writer):
 def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
     metric_name = "test_gracefully_handles_badly_set_dimension"
 
-    metrics_writer.put_metric(
-        metric_name=metric_name, value=1, dimensions={"this fails"}
-    )
-    metrics_writer.put_metric(
-        metric_name=metric_name, value=1, dimensions={"this": "succeeds"}
-    )
+    metrics_writer.put_metric(metric_name=metric_name, value=1, dimensions={"this fails"})
+    metrics_writer.put_metric(metric_name=metric_name, value=1, dimensions={"this": "succeeds"})
 
     captured = capsys.readouterr()
     log_lines = captured.out.strip().splitlines()

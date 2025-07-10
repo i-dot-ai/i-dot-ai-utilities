@@ -86,9 +86,7 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
         },
     )
 
-    templated_message_string = (
-        "This is a test message. Email: {email}, ID: {id}. Fields will be interpolated"
-    )
+    templated_message_string = "This is a test message. Email: {email}, ID: {id}. Fields will be interpolated"
     email = "foo@baz.com"
     user_id = 12345
 
@@ -99,15 +97,11 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
     )
 
     test_dict = {"foo": {"bar": "baz"}}
-    templated_message_dict = (
-        "This is a test with a nested dictionary. Dictionary is {test_dict}. Fin"
-    )
+    templated_message_dict = "This is a test with a nested dictionary. Dictionary is {test_dict}. Fin"
     logger.info(templated_message_dict, test_dict=test_dict)
 
     test_array = [0, 1, 2, 3, [4, "test_item"], 5]
-    templated_message_array = (
-        "This is a test with a nested array. Array is {test_array}. Fin"
-    )
+    templated_message_array = "This is a test with a nested array. Array is {test_array}. Fin"
     logger.info(templated_message_array, test_array=test_array)
 
     captured = capsys.readouterr()
@@ -118,8 +112,7 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
         parsed.append(json.loads(line))
 
     assert parsed[0].get("message") == (
-        "This is a test message. Email: foo@baz.com, ID: 12345. "
-        "Fields will be interpolated"
+        "This is a test message. Email: foo@baz.com, ID: 12345. Fields will be interpolated"
     )
     assert parsed[0].get("message_template") == templated_message_string
     assert parsed[0].get("email") == email
@@ -154,8 +147,7 @@ def test_string_interpolation_failure_handled_by_logger(capsys):
         parsed.append(json.loads(line))
 
     assert parsed[0].get("message") == (
-        "Exception(Logger): Variable interpolation failed when formatting log "
-        "message. Is a value missing?"
+        "Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?"
     )
 
     assert parsed[1].get("message") == templated_message_string

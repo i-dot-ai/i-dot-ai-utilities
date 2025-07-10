@@ -9,7 +9,7 @@ It provides common features used in many of our applications.
 
 #### Structured Logging
 
-The structured logging library is used to generate logs in a known format so they can be further processed into logging systems downstream. It also provides the ability to easily enrich log messages with useful data, and in some cases does this automatically. 
+The structured logging library is used to generate logs in a known format so they can be further processed into logging systems downstream. It also provides the ability to easily enrich log messages with useful data, and in some cases does this automatically.
 
 You can find information on usage of the logging library in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
 

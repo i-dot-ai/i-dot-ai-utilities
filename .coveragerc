@@ -1,0 +1,33 @@
+[run]
+# Remove source since you're specifying it via --cov in command line
+omit =
+    */tests/*
+    */test_*
+    src/i_dot_ai_utilities/file_store/settings.py
+
+[report]
+# Regexes for lines to exclude from consideration
+exclude_lines =
+    # Have to re-enable the standard pragma
+    pragma: no cover
+
+    # Don't complain about missing debug-only code:
+    def __repr__
+    if self\.debug
+
+    # Don't complain if tests don't hit defensive assertion code:
+    raise AssertionError
+    raise NotImplementedError
+
+    # Don't complain if non-runnable code isn't run:
+    if 0:
+    if __name__ == .__main__.:
+
+    # Don't complain about abstract methods, they aren't run:
+    @(abc\.)?abstractmethod
+
+show_missing = true
+precision = 2
+
+[html]
+directory = htmlcov

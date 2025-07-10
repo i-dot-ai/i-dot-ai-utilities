@@ -1,5 +1,9 @@
+-include .env
+export
+
 test:
-	PACKAGE_DIRS="logging,metrics"; \
+	docker compose up -d --wait minio && \
+	PACKAGE_DIRS="logging,metrics,file_store"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \

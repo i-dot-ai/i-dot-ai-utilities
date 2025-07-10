@@ -1,0 +1,28 @@
+services:
+  minio:
+    image: minio/minio
+    expose:
+      - "9000"
+      - "9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    command: server --console-address ":9001" /data
+    networks:
+      - utilities-net
+    volumes:
+      - minio_data:/var/lib/minio/data:Z
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "mc", "ready", "local" ]
+      retries: 20
+      start_period: 60s
+      start_interval: 1s
+
+networks:
+    utilities-net:
+volumes:
+    minio_data:

@@ -2,6 +2,9 @@ name: Check code
 
 env:
   DOCKER_BUILDKIT: 1
+  ENVIRONMENT: test
+  IAI_FS_BUCKET_NAME: test-bucket
+  IAI_FS_AWS_REGION: eu-west-2
 
 on:
   push:
