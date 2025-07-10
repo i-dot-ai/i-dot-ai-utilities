@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator
 from typing import Any
 
@@ -11,7 +12,15 @@ from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
-settings = Settings()  # type: ignore[call-arg]
+
+def set_environment_variables() -> None:
+    os.environ["ENVIRONMENT"] = "local"
+    os.environ["IAI_FS_BUCKET_NAME"] = "test-bucket"
+    os.environ["IAI_FS_AWS_REGION"] = "eu-west-2"
+    os.environ["IAI_FS_MINIO_ADDRESS"] = "http://localhost:9000"
+    os.environ["IAI_FS_AWS_ACCESS_KEY_ID"] = "minioadmin"
+    os.environ["IAI_FS_AWS_SECRET_ACCESS_KEY"] = "minioadmin"  # noqa: S105
+    os.environ["IAI_FS_DATA_DIR"] = "app_data"
 
 
 def define_logger() -> StructuredLogger:
@@ -28,17 +37,23 @@ def define_logger() -> StructuredLogger:
 
 
 @pytest.fixture
+def settings() -> Settings:
+    set_environment_variables()
+    return Settings()  # type: ignore[call-arg]
+
+
+@pytest.fixture
 def file_store() -> FileStore:
     return FileStore(define_logger())
 
 
 @pytest.fixture
-def client() -> boto3.client:
+def client(settings: Settings) -> boto3.client:
     return settings.boto3_client()
 
 
 @pytest.fixture
-def bucket(client: boto3.client) -> Generator[Any, Any, None]:
+def bucket(client: boto3.client, settings: Settings) -> Generator[Any, Any, None]:
     try:
         client.head_bucket(Bucket=settings.bucket_name)
     except ClientError:
