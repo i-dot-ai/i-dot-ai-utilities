@@ -28,6 +28,7 @@ classifiers = [
 
 dependencies = [
     "boto3>=1.38.35",
+    "litellm>=1.74.0.post1",
     "minio>=7.2.15",
     "pydantic-settings>=2.9.1",
     "requests>=2.32.3",
@@ -51,6 +52,11 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+allow_redefinition = true
+ignore_missing_imports = true
+exclude = [
+    "src/i_dot_ai_utilities/S*/settings.py$"  # Regex to exclude all settings.py in utilities subdirs
+]
 
 [tool.ruff]
 line-length = 120
