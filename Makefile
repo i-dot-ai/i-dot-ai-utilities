@@ -11,7 +11,8 @@ test:
 		--cov src/i_dot_ai_utilities/$$dir \
 		--cov-report term-missing \
 		--cov-fail-under 75 || exit 1; \
-	done
+	done; \
+	docker compose down minio
 
 lint:
 	uv run ruff format --check

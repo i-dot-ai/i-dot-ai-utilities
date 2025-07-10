@@ -8,9 +8,6 @@ from botocore.exceptions import ClientError
 from i_dot_ai_utilities.file_store.settings import Settings
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
-settings = Settings()  # type: ignore[call-arg]
-
-
 class FileStore:
     """
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
@@ -21,17 +18,17 @@ class FileStore:
         Initialize FileStore with boto3 client from settings
         :param logger: A `StructuredLogger` instance
         """
-        self.client: boto3.client = settings.boto3_client()
+        self.settings = Settings()
+        self.client: boto3.client = self.settings.boto3_client()
         self.logger = logger
 
-    @staticmethod
-    def __prefix_key(key: str) -> str:
+    def __prefix_key(self, key: str) -> str:
         """
         Returns the key with a prefix if it's set
         :param key: The S3 object key
         :return: The key with a prefix if it's set
         """
-        return key if not settings.data_dir else f"{settings.data_dir}/{key}"
+        return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
 
     def create_object(
         self,
@@ -52,7 +49,7 @@ class FileStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
             put_args = {"Bucket": bucket, "Key": key, "Body": data}
@@ -83,7 +80,7 @@ class FileStore:
         Returns:
             Object content as bytes or string, None if not found
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
             response = self.client.get_object(Bucket=bucket, Key=key)
@@ -131,7 +128,7 @@ class FileStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
             self.client.delete_object(Bucket=bucket, Key=key)
@@ -152,7 +149,7 @@ class FileStore:
         Returns:
             bool: True if object exists, False otherwise
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
             self.client.head_object(Bucket=bucket, Key=key)
@@ -174,7 +171,7 @@ class FileStore:
         Returns:
             str: S3 object pre-signed URL as string. If error, returns None
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         try:
             does_object_exist = self.object_exists(key)
             if not does_object_exist:
@@ -201,7 +198,7 @@ class FileStore:
         Returns:
             List of dictionaries containing object information
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         prefix = self.__prefix_key(prefix)
         objects = []
         try:
@@ -234,7 +231,7 @@ class FileStore:
         Returns:
             Dictionary containing object metadata or None if not found
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
             response = self.client.head_object(Bucket=bucket, Key=key)
@@ -268,7 +265,7 @@ class FileStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        bucket = settings.bucket_name
+        bucket = self.settings.bucket_name
         source_key = self.__prefix_key(source_key)
         dest_key = self.__prefix_key(dest_key)
         try:
