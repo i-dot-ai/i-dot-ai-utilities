@@ -13,7 +13,11 @@ class FargateContainerLabelsLike:
         return self._raw.get("com.amazonaws.ecs.task-arn", "unknown")
 
 
-class ExtractedFargateContext(TypedDict):
-    fargate_image_id: str
-    fargate_task_arn: str
-    fargate_container_started_at: str
+ExtractedFargateContext = TypedDict(
+    "ExtractedFargateContext",
+    {
+        "fargate.image_id": str,
+        "fargate.task_arn": str,
+        "fargate.container_started_at": str,
+    },
+)

@@ -28,10 +28,14 @@ class RequestLike(Protocol):
     def url(self) -> URLLike: ...
 
 
-class ExtractedFastApiContext(TypedDict):
-    request_method: str
-    request_base_url: str
-    request_user_agent: str
-    request_x_forwarded_for: str
-    request_path: str
-    request_query: str
+ExtractedFastApiContext = TypedDict(
+    "ExtractedFastApiContext",
+    {
+        "request.method": str,
+        "request.base_url": str,
+        "request.user_agent": str,
+        "request.x_forwarded_for": str,
+        "request.path": str,
+        "request.query": str,
+    },
+)
