@@ -24,9 +24,9 @@ class FargateEnvironmentEnricher:
             return None
 
         return {
-            "fargate_image_id": loaded_metadata.image_id,
-            "fargate_task_arn": loaded_metadata.labels.task_arn,
-            "fargate_container_started_at": loaded_metadata.started_at,
+            "fargate.image_id": loaded_metadata.image_id,
+            "fargate.task_arn": loaded_metadata.labels.task_arn,
+            "fargate.container_started_at": loaded_metadata.started_at,
         }
 
     def _get_metadata_response(self) -> Any:
