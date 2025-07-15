@@ -7,7 +7,7 @@ from i_dot_ai_utilities.logging.enrichers.fastapi_enricher import (
     FastApiEnricher,
     RequestLike,
 )
-from i_dot_ai_utilities.logging.enrichers.lambda_enricher import LambdaContextEnricher
+from i_dot_ai_utilities.logging.enrichers.lambda_context_enricher import LambdaContextEnricher
 from i_dot_ai_utilities.logging.types.enrichment_types import (
     ContextEnrichmentType,
     ExecutionEnvironmentType,
