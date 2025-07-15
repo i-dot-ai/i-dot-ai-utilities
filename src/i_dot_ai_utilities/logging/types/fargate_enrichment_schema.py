@@ -17,6 +17,7 @@ class FargateMetadata(TypedDict):
     image_id: str
     task_arn: str
     container_started_at: str
+    aws_region: str
 
 
 class ExtractedFargateContext(TypedDict):

@@ -24,6 +24,7 @@ class FargateEnvironmentEnricher:
                     "image_id": loaded_metadata.image_id,
                     "task_arn": loaded_metadata.labels.task_arn,
                     "container_started_at": loaded_metadata.started_at,
+                    "aws_region": loaded_metadata.aws_region,
                 }
             }
         except Exception:
@@ -58,6 +59,8 @@ class FargateContainerMetadataResponse:
             self.labels: FargateContainerLabelsLike = FargateContainerLabelsLike(
                 raw_response["Labels"]
             )
+            self.aws_region: str = raw_response["AvailabilityZone"][:-1]
+
         except Exception as e:
             msg = (
                 "Exception(Logger): Response doesn't conform to "
