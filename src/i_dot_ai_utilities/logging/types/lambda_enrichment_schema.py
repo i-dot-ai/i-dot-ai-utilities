@@ -21,3 +21,12 @@ class LambdaContextMetadata(TypedDict):
 
 class ExtractedLambdaContext(TypedDict):
     lambda_context: LambdaContextMetadata
+
+
+class LambdaEnvironmentMetadata(TypedDict):
+    aws_region: str
+    function_name: str
+
+
+class ExtractedLambdaEnvironmentMetadata(TypedDict):
+    lambda_os: LambdaEnvironmentMetadata

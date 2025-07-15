@@ -9,3 +9,4 @@ class ContextEnrichmentType(Enum):
 class ExecutionEnvironmentType(Enum):
     LOCAL = 1
     FARGATE = 2
+    LAMBDA = 3

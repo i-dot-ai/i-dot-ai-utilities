@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from i_dot_ai_utilities.logging.enrichers.context_extractor import (
+    ExtractedContextResult,
+)
 from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     EnrichmentProvider,
     ExecutionEnvironmentType,
@@ -14,9 +17,6 @@ from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
 from i_dot_ai_utilities.logging.types.context_fields import ContextFieldValue
-from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
-    ExtractedFargateContext,
-)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
@@ -225,7 +225,7 @@ class StructuredLogger:
             return message_template
 
     def _set_environment_context(
-        self, environment_context: ExtractedFargateContext | None
+        self, environment_context: ExtractedContextResult
     ) -> None:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
