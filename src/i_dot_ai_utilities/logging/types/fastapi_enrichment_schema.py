@@ -27,6 +27,7 @@ class RequestLike(Protocol):
     @property
     def url(self) -> URLLike: ...
 
+
 class FastApiRequestMetadata(TypedDict):
     method: str
     base_url: str
@@ -34,6 +35,7 @@ class FastApiRequestMetadata(TypedDict):
     x_forwarded_for: str
     path: str
     query: str
+
 
 class ExtractedFastApiContext(TypedDict):
     request: FastApiRequestMetadata

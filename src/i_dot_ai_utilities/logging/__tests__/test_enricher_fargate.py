@@ -45,7 +45,9 @@ def test_fargate_enriched_logger_contains_expected_fields(
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get("fargate").get("image_id") == load_test_metadata_object["ImageID"]
+    assert (
+        parsed[0].get("fargate").get("image_id") == load_test_metadata_object["ImageID"]
+    )
     assert (
         parsed[0].get("fargate").get("task_arn")
         == load_test_metadata_object["Labels"]["com.amazonaws.ecs.task-arn"]

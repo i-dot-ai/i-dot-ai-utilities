@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from i_dot_ai_utilities.logging.enrichers.fargate_enricher import (
     FargateEnvironmentEnricher,
@@ -7,6 +7,7 @@ from i_dot_ai_utilities.logging.enrichers.fastapi_enricher import (
     FastApiEnricher,
     RequestLike,
 )
+from i_dot_ai_utilities.logging.enrichers.lambda_enricher import LambdaContextEnricher
 from i_dot_ai_utilities.logging.types.enrichment_types import (
     ContextEnrichmentType,
     ExecutionEnvironmentType,
@@ -17,16 +18,22 @@ from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
 from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
     ExtractedFastApiContext,
 )
+from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import (
+    ExtractedLambdaContext,
+    LambdaContextLike,
+)
 
 
 class EnrichmentProvider:
     _fast_api_enricher: FastApiEnricher
+    _lambda_enricher: LambdaContextEnricher
     _execution_environment_enricher: FargateEnvironmentEnricher | None
     _execution_environment_context_cache: ExtractedFargateContext | None = None
     _has_environment_context_extraction_ran = False
 
     def __init__(self, execution_environment: ExecutionEnvironmentType):
         self._fast_api_enricher = FastApiEnricher()
+        self._lambda_enricher = LambdaContextEnricher()
 
         match execution_environment:
             case ExecutionEnvironmentType.FARGATE:
@@ -38,12 +45,16 @@ class EnrichmentProvider:
         self,
         self_logger: Any,
         enricher_type: ContextEnrichmentType,
-        enricher_object: RequestLike,
-    ) -> ExtractedFastApiContext | None:
+        enricher_object: RequestLike | LambdaContextLike,
+    ) -> ExtractedFastApiContext | ExtractedLambdaContext | None:
         match enricher_type:
             case ContextEnrichmentType.FASTAPI:
                 return self._fast_api_enricher.extract_context(
-                    self_logger, enricher_object
+                    self_logger, cast("RequestLike", enricher_object)
+                )
+            case ContextEnrichmentType.LAMBDA:
+                return self._lambda_enricher.extract_context(
+                    self_logger, cast("LambdaContextLike", enricher_object)
                 )
             case _:
                 self_logger.exception(
