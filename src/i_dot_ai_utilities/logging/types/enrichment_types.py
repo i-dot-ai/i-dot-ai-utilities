@@ -3,6 +3,7 @@ from enum import Enum
 
 class ContextEnrichmentType(Enum):
     FASTAPI = 1
+    LAMBDA = 2
 
 
 class ExecutionEnvironmentType(Enum):
