@@ -17,17 +17,19 @@ class FargateEnvironmentEnricher:
         try:
             metadata_response = self._get_metadata_response()
             loaded_metadata = FargateContainerMetadataResponse(metadata_response)
+
+            return {
+                "fargate": {
+                    "image_id": loaded_metadata.image_id,
+                    "task_arn": loaded_metadata.labels.task_arn,
+                    "container_started_at": loaded_metadata.started_at,
+                }
+            }
         except Exception:
             self_logger.exception(
                 "Exception(Logger): Failed to extract Fargate container metadata fields"
             )
             return None
-
-        return {
-            "fargate.image_id": loaded_metadata.image_id,
-            "fargate.task_arn": loaded_metadata.labels.task_arn,
-            "fargate.container_started_at": loaded_metadata.started_at,
-        }
 
     def _get_metadata_response(self) -> Any:
         url = os.environ.get(self._container_metadata_url_parameter_name, None)
