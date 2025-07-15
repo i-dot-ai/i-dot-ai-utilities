@@ -20,4 +20,4 @@ class LambdaContextMetadata(TypedDict):
 
 
 class ExtractedLambdaContext(TypedDict):
-    aws_lambda: LambdaContextMetadata
+    lambda_context: LambdaContextMetadata

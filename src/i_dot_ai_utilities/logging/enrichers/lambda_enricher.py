@@ -15,7 +15,7 @@ class LambdaContextEnricher:
             self._validate_object_instance(request)
 
             response = {
-                "aws_lambda": {
+                "lambda_context": {
                     "function_name": request.function_name,
                     "request_id": request.aws_request_id,
                     "function_arn": request.invoked_function_arn,

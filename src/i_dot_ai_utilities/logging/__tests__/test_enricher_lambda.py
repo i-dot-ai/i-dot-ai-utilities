@@ -47,7 +47,7 @@ def test_lambda_context_enriched_logger_contains_expected_fields(
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    req_object = (parsed[0]).get("aws_lambda")
+    req_object = (parsed[0]).get("lambda_context")
 
     assert (req_object).get("function_name") == "test-function"
     assert (req_object).get("request_id") == "abc123"
