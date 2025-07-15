@@ -16,7 +16,6 @@ from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import LambdaCont
 @pytest.fixture
 def load_test_request_object() -> LambdaContextLike:
     return SimpleNamespace(
-        function_name="test-function",
         aws_request_id="abc123",
         invoked_function_arn="arn:aws:foo:bar:lambda/baz",
     )
@@ -49,7 +48,6 @@ def test_lambda_context_enriched_logger_contains_expected_fields(
 
     req_object = (parsed[0]).get("lambda_context")
 
-    assert (req_object).get("function_name") == "test-function"
     assert (req_object).get("request_id") == "abc123"
     assert (req_object).get("function_arn") == "arn:aws:foo:bar:lambda/baz"
 

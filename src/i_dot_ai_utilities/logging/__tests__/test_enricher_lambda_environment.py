@@ -45,6 +45,7 @@ def test_lambda_environment_enriched_logger_contains_expected_fields(capsys):
         parsed.append(json.loads(line))
 
     assert (parsed[0]).get("lambda_os").get("function_name") == "test-function"
+    assert (parsed[0]).get("lambda_os").get("aws_region") == "eu-test-1"
 
 
 def test_lambda_environment_enrichment_handles_missing_vars(capsys):
