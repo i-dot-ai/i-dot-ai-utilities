@@ -245,9 +245,11 @@ class StructuredLogger:
 
         base_context: BaseContext = {
             "context_id": str(uuid.uuid4()),
-            "env_app_name": os.environ.get("APP_NAME", "unknown"),
-            "env_repo_name": os.environ.get("REPO", "unknown"),
-            "env_environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            "env": {
+                "app_name": os.environ.get("APP_NAME", "unknown"),
+                "repo_name": os.environ.get("REPO", "unknown"),
+                "environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            },
             "ship_logs": 1 if self._ship_logs else 0,
         }
         structlog.contextvars.bind_contextvars(**base_context)

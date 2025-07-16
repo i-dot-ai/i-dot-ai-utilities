@@ -19,6 +19,7 @@ def load_test_metadata_object():
         "Labels": {
             "com.amazonaws.ecs.task-arn": test_arn,
         },
+        "AvailabilityZone": "eu-test-1a",
     }
 
 
@@ -45,16 +46,16 @@ def test_fargate_enriched_logger_contains_expected_fields(
     for line in log_lines:
         parsed.append(json.loads(line))
 
+    fargate = parsed[0].get("fargate")
+
+    assert fargate.get("image_id") == load_test_metadata_object["ImageID"]
     assert (
-        parsed[0].get("fargate").get("image_id") == load_test_metadata_object["ImageID"]
-    )
-    assert (
-        parsed[0].get("fargate").get("task_arn")
+        fargate.get("task_arn")
         == load_test_metadata_object["Labels"]["com.amazonaws.ecs.task-arn"]
     )
+    assert fargate.get("container_started_at") == load_test_metadata_object["StartedAt"]
     assert (
-        parsed[0].get("fargate").get("container_started_at")
-        == load_test_metadata_object["StartedAt"]
+        fargate.get("aws_region") == load_test_metadata_object["AvailabilityZone"][:-1]
     )
 
 
