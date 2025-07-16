@@ -4,13 +4,16 @@ from typing import Any
 from urllib import request
 from urllib.parse import urlparse
 
+from i_dot_ai_utilities.logging.enrichers.context_extractor import (
+    BaseEnvironmentEnricher,
+)
 from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
     ExtractedFargateContext,
     FargateContainerLabelsLike,
 )
 
 
-class FargateEnvironmentEnricher:
+class FargateEnvironmentEnricher(BaseEnvironmentEnricher):
     _container_metadata_url_parameter_name: str = "ECS_CONTAINER_METADATA_URI_V4"
 
     def extract_context(self, self_logger: Any) -> ExtractedFargateContext | None:
