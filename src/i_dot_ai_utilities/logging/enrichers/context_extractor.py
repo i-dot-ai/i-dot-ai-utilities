@@ -8,9 +8,7 @@ from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import (
     ExtractedLambdaEnvironmentMetadata,
 )
 
-ExtractedContextResult = (
-    ExtractedFargateContext | ExtractedLambdaEnvironmentMetadata | None
-)
+ExtractedContextResult = ExtractedFargateContext | ExtractedLambdaEnvironmentMetadata | None
 
 
 class BaseEnvironmentEnricher(ABC):

@@ -23,9 +23,7 @@ def load_lambda_environment_variables() -> LambdaEnvironmentSettings:
 
 
 class LambdaEnvironmentEnricher(BaseEnvironmentEnricher):
-    def extract_context(
-        self, self_logger: Any
-    ) -> ExtractedLambdaEnvironmentMetadata | None:
+    def extract_context(self, self_logger: Any) -> ExtractedLambdaEnvironmentMetadata | None:
         response: ExtractedLambdaEnvironmentMetadata | None = None
         try:
             loaded_metadata = load_lambda_environment_variables()
@@ -37,9 +35,7 @@ class LambdaEnvironmentEnricher(BaseEnvironmentEnricher):
                 }
             }
         except Exception:
-            self_logger.exception(
-                "Exception(Logger): Failed to extract Lambda environment variables"
-            )
+            self_logger.exception("Exception(Logger): Failed to extract Lambda environment variables")
             return None
         else:
             return response
