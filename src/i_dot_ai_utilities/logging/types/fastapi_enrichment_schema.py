@@ -28,10 +28,14 @@ class RequestLike(Protocol):
     def url(self) -> URLLike: ...
 
 
+class FastApiRequestMetadata(TypedDict):
+    method: str
+    base_url: str
+    user_agent: str
+    x_forwarded_for: str
+    path: str
+    query: str
+
+
 class ExtractedFastApiContext(TypedDict):
-    request_method: str
-    request_base_url: str
-    request_user_agent: str
-    request_x_forwarded_for: str
-    request_path: str
-    request_query: str
+    request: FastApiRequestMetadata

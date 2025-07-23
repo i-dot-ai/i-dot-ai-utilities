@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from i_dot_ai_utilities.logging.enrichers.context_extractor import (
+    ExtractedContextResult,
+)
 from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     EnrichmentProvider,
     ExecutionEnvironmentType,
@@ -14,9 +17,6 @@ from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
 from i_dot_ai_utilities.logging.types.context_fields import ContextFieldValue
-from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
-    ExtractedFargateContext,
-)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
@@ -167,10 +167,12 @@ class StructuredLogger:
 
         :param field_key: The key of the field.
         :param field_value: The value of the field.
-        """
+        """  # noqa: E501
         structlog.contextvars.bind_contextvars(**{field_key: field_value})
 
-    def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
+    def refresh_context(
+        self, context_enrichers: list[ContextEnrichmentOptions] | None = None
+    ) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
@@ -185,7 +187,9 @@ class StructuredLogger:
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]
-            ctx = self._enricher_provider.extract_context_from_framework_enricher(self, enricher_type, enricher_object)
+            ctx = self._enricher_provider.extract_context_from_framework_enricher(
+                self, enricher_type, enricher_object
+            )
 
             if ctx is not None:
                 additional_context.update(ctx)
@@ -195,11 +199,13 @@ class StructuredLogger:
     def _should_ship_logs(self, options: LoggerConfigOptions) -> bool:
         selected_option = options.get("ship_logs", self._default_config["ship_logs"])
         if (
-            options.get("log_format", self._default_config["log_format"]) is not LogOutputFormat.JSON
+            options.get("log_format", self._default_config["log_format"])
+            is not LogOutputFormat.JSON
             and selected_option is True
         ):
             self._logger.warning(
-                "Warning(Logger): messages cannot be shipped downstream outside of JSON format. Disabling log shipping"
+                "Warning(Logger): messages cannot be shipped downstream "
+                "outside of JSON format. Disabling log shipping"
             )
             return False
 
@@ -210,12 +216,17 @@ class StructuredLogger:
             return message_template.format(**kwargs)
         except KeyError:
             self._logger.exception(
-                ("Exception(Logger): Variable interpolation failed when formatting log message. Is a value missing?"),
+                (
+                    "Exception(Logger): Variable interpolation failed when formatting "
+                    "log message. Is a value missing?"
+                ),
                 message_template=message_template,
             )
             return message_template
 
-    def _set_environment_context(self, environment_context: ExtractedFargateContext | None) -> None:
+    def _set_environment_context(
+        self, environment_context: ExtractedContextResult
+    ) -> None:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
@@ -226,15 +237,19 @@ class StructuredLogger:
             )
 
     def _upsert_base_context(self) -> None:
-        self._set_environment_context(self._enricher_provider.load_execution_environment_context(self))
+        self._set_environment_context(
+            self._enricher_provider.load_execution_environment_context(self)
+        )
 
         self._set_logger_name()
 
         base_context: BaseContext = {
             "context_id": str(uuid.uuid4()),
-            "env_app_name": os.environ.get("APP_NAME", "unknown"),
-            "env_repo_name": os.environ.get("REPO", "unknown"),
-            "env_environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            "env": {
+                "app_name": os.environ.get("APP_NAME", "unknown"),
+                "repo_name": os.environ.get("REPO", "unknown"),
+                "environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            },
             "ship_logs": 1 if self._ship_logs else 0,
         }
         structlog.contextvars.bind_contextvars(**base_context)
@@ -250,7 +265,9 @@ class StructuredLogger:
             case "ERROR" | logging.ERROR:
                 return logging.ERROR
             case _:
-                self._logger.warning("Log level {level} not recognised, defaulting to INFO", level=level)
+                self._logger.warning(
+                    "Log level {level} not recognised, defaulting to INFO", level=level
+                )
                 return logging.INFO
 
     def _load_config_defaults(self) -> LoggerConfigOptions:

@@ -45,9 +45,13 @@ def test_base_context_set_correctly(capsys):
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert parsed[0].get("env_app_name") == test_app_name
+    base_context_env = parsed[0].get("env")
+
+    assert base_context_env.get("app_name") == test_app_name
+    assert base_context_env.get("environment_name") == test_env_name
+    assert base_context_env.get("repo_name") == "unknown"
+
     assert parsed[0].get("ship_logs") == 1
-    assert parsed[0].get("env_environment_name") == test_env_name
     assert parsed[0].get("context_id") == parsed[1].get("context_id")
 
 

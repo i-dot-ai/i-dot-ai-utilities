@@ -51,11 +51,13 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert (parsed[0]).get("request_method") == "GET"
-    assert (parsed[0]).get("request_base_url") == "http://testserver/"
-    assert (parsed[0]).get("request_path") == "/logger/unit/testing"
-    assert (parsed[0]).get("request_user_agent") == "test agent"
-    assert (parsed[0]).get("request_query") == "islogger=true&istest=true"
+    req_object = (parsed[0]).get("request")
+
+    assert (req_object).get("method") == "GET"
+    assert (req_object).get("base_url") == "http://testserver/"
+    assert (req_object).get("path") == "/logger/unit/testing"
+    assert (req_object).get("user_agent") == "test agent"
+    assert (req_object).get("query") == "islogger=true&istest=true"
 
 
 @pytest.mark.parametrize(
