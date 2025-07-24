@@ -142,3 +142,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/i_dot_ai_utilities"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
+]
