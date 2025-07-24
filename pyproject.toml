@@ -38,26 +38,6 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/i-dot-ai/i-dot-ai-utilities"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3.5",
-    "pytest-cov>=6.1.1",
-    "ruff>=0.12.2",
-    "mypy>=1.15.0",
-]
-
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-allow_redefinition = true
-ignore_missing_imports = true
-exclude = [
-    "src/i_dot_ai_utilities/S*/settings.py$"  # Regex to exclude all settings.py in utilities subdirs
-]
-
 [tool.ruff]
 line-length = 120
 
@@ -122,6 +102,7 @@ known-first-party = ["i-dot-ai-utilities"]
 "*/tests/*" = ["S101", "S106", "PLR0913", "PLR0915", "PLR2004", "TD003"]
 "*/tests_playwright/*" = ["S101", "S106", "PLR0913", "PLR2004", "TD003"]
 "src/i_dot_ai_utilities/logging/*" = ["TRY003"]
+"src/i_dot_ai_utilities/litellm/*" = ["EM101", "TRY003"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -137,6 +118,9 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
+    "types-requests>=2.32.4.20250611",
+    "types-setuptools>=80.9.0.20250529",
+    "types-urllib3>=1.26.25.14",
 ]
 
 [tool.hatch.build]
