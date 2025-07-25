@@ -2,7 +2,7 @@ name: Publish python package
 
 on:
   release:
-    types: 
+    types:
       - released
       - prereleased
 

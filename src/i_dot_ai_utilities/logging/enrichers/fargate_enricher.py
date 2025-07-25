@@ -31,9 +31,7 @@ class FargateEnvironmentEnricher(BaseEnvironmentEnricher):
                 }
             }
         except Exception:
-            self_logger.exception(
-                "Exception(Logger): Failed to extract Fargate container metadata fields"
-            )
+            self_logger.exception("Exception(Logger): Failed to extract Fargate container metadata fields")
             return None
         else:
             return response
@@ -59,14 +57,9 @@ class FargateContainerMetadataResponse:
         try:
             self.image_id: str = raw_response["ImageID"]
             self.started_at: str = raw_response["StartedAt"]
-            self.labels: FargateContainerLabelsLike = FargateContainerLabelsLike(
-                raw_response["Labels"]
-            )
+            self.labels: FargateContainerLabelsLike = FargateContainerLabelsLike(raw_response["Labels"])
             self.aws_region: str = raw_response["AvailabilityZone"][:-1]
 
         except Exception as e:
-            msg = (
-                "Exception(Logger): Response doesn't conform to "
-                "FargateContainerMetadataResponse. Context not set."
-            )
+            msg = "Exception(Logger): Response doesn't conform to FargateContainerMetadataResponse. Context not set."
             raise TypeError(msg) from e

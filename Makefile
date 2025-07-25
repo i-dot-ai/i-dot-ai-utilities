@@ -1,5 +1,10 @@
+-include .env
+export
+
 test:
-	PACKAGE_DIRS="logging,metrics"; \
+	export IAI_FS_BUCKET_NAME=test-bucket && \
+	docker compose up -d --wait minio && \
+	PACKAGE_DIRS="logging,metrics,file_store"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
@@ -7,7 +12,8 @@ test:
 		--cov src/i_dot_ai_utilities/$$dir \
 		--cov-report term-missing \
 		--cov-fail-under 75 || exit 1; \
-	done
+	done; \
+	docker compose down minio
 
 lint:
 	uv run ruff format --check

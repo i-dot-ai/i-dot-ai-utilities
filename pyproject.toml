@@ -29,6 +29,8 @@ classifiers = [
 dependencies = [
     "pydantic>=2.11.7",
     "pydantic-settings>=2.10.1",
+    "boto3>=1.38.35",
+    "minio>=7.2.15",
     "requests>=2.32.3",
     "structlog>=25.4.0",
 ]
@@ -40,14 +42,9 @@ dependencies = [
 dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
-    "ruff>=0.11.7",
+    "ruff>=0.12.2",
     "mypy>=1.15.0",
 ]
-
-# [tool.pytest.ini_options]
-# testpaths = ["tests"]
-# python_files = "test_*.py"
-# python_functions = "test_*"
 
 [tool.mypy]
 python_version = "3.12"
@@ -55,6 +52,9 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[tool.ruff]
+line-length = 120
 
 [tool.ruff.lint]
 # Dribble in those we have commented out, asterisked ones first
@@ -142,3 +142,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/i_dot_ai_utilities"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
+]

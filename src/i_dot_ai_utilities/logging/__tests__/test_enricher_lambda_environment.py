@@ -67,8 +67,6 @@ def test_lambda_environment_enrichment_handles_missing_vars(capsys):
         parsed.append(json.loads(line))
 
     assert "Failed to extract Lambda environment variables" in parsed[0].get("message")
-    assert "validation errors for LambdaEnvironmentSettings" in parsed[0].get(
-        "exception"
-    )
+    assert "validation errors for LambdaEnvironmentSettings" in parsed[0].get("exception")
 
     assert parsed[1].get("message") == success_msg

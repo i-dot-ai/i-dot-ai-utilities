@@ -40,7 +40,7 @@ from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 def get_metric_writer() -> MetricsWriter:
     # This could also be a switch-case or factory class
     return CloudwatchEmbeddedMetricsWriter(
-        namespace=os.environ['REPO'], 
+        namespace=os.environ['REPO'],
         environment=os.environ['ENVIRONMENT'],
     )
 
@@ -66,12 +66,12 @@ def login():
             name="successful_logins"
             value=1
         )
-    except NotAuthorisedError: 
+    except NotAuthorisedError:
         # login unauthorised
         metrics.put_metric(
             name="failed_logins"
             value=1
-        )        
+        )
     except Exception:
         # an unhandled exception occurred
         metrics.put_metric(
@@ -165,4 +165,4 @@ metrics.put_metric(
 )
 ```
 
-In this case, the same warning for when using dimensions applies here - care should be taken to ensure the `service_name` variable (e.g.) can't spawn too many permutations, or it could cause an explosion in the amount of different metrics stored by CloudWatch. 
+In this case, the same warning for when using dimensions applies here - care should be taken to ensure the `service_name` variable (e.g.) can't spawn too many permutations, or it could cause an explosion in the amount of different metrics stored by CloudWatch.

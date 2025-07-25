@@ -21,12 +21,8 @@ def load_test_request_object() -> LambdaContextLike:
     )
 
 
-def test_lambda_context_enriched_logger_contains_expected_fields(
-    load_test_request_object, capsys
-):
-    logger = StructuredLogger(
-        level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL}
-    )
+def test_lambda_context_enriched_logger_contains_expected_fields(load_test_request_object, capsys):
+    logger = StructuredLogger(level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL})
 
     logger.refresh_context(
         context_enrichers=[
@@ -61,12 +57,8 @@ def test_lambda_context_enriched_logger_contains_expected_fields(
         "blah",
     ],
 )
-def test_fastapi_enrichment_handles_malformed_object(
-    lambda_context_object_value, capsys
-):
-    logger = StructuredLogger(
-        level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL}
-    )
+def test_fastapi_enrichment_handles_malformed_object(lambda_context_object_value, capsys):
+    logger = StructuredLogger(level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL})
 
     logger.refresh_context(
         context_enrichers=[
@@ -87,9 +79,7 @@ def test_fastapi_enrichment_handles_malformed_object(
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert "doesn't conform to LambdaContextLike. Context not set" in parsed[0].get(
-        "exception"
-    )
+    assert "doesn't conform to LambdaContextLike. Context not set" in parsed[0].get("exception")
     assert parsed[0].get("level") == "error"
 
     assert parsed[1].get("message") == log_message
