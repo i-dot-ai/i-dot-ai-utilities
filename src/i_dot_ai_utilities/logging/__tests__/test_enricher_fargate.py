@@ -13,6 +13,7 @@ from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironme
 base_metadata_url = "https://test-base-container-url"
 os.environ["ECS_CONTAINER_METADATA_URI_V4"] = base_metadata_url
 
+
 def load_test_container_metadata_object():
     test_arn = "arn:aws:ecs:us-east-1:123456789012:task/testcluster/testarn"  # aws-ignore
     return {
@@ -20,13 +21,15 @@ def load_test_container_metadata_object():
         "StartedAt": "2023-07-21T15:45:44.954460255Z",
         "Labels": {
             "com.amazonaws.ecs.task-arn": test_arn,
-        }
+        },
     }
+
 
 def load_test_task_metadata_object():
     return {
         "AvailabilityZone": "eu-test-1a",
     }
+
 
 def load_mock_metadata_response(arg):
     if arg == base_metadata_url:
@@ -34,7 +37,8 @@ def load_mock_metadata_response(arg):
     elif arg == f"{base_metadata_url}/task":
         return load_test_task_metadata_object()
     else:
-        raise Exception("Incorrect arg")
+        return {}
+
 
 @patch.object(
     i_dot_ai_utilities.logging.enrichers.fargate_enricher.FargateEnvironmentEnricher,
@@ -58,7 +62,7 @@ def test_fargate_enriched_logger_contains_expected_fields(mocked_metadata_respon
         parsed.append(json.loads(line))
 
     fargate = parsed[0].get("fargate")
-    print(fargate)
+
     assert fargate.get("image_id") == load_test_container_metadata_object()["ImageID"]
     assert fargate.get("task_arn") == load_test_container_metadata_object()["Labels"]["com.amazonaws.ecs.task-arn"]
     assert fargate.get("container_started_at") == load_test_container_metadata_object()["StartedAt"]
@@ -101,7 +105,7 @@ def test_fargate_enrichment_handles_malformed_response_object(
 
 def test_logger_handles_exception_if_outside_of_fargate_environment(capsys):
     del os.environ["ECS_CONTAINER_METADATA_URI_V4"]
-    
+
     logger = StructuredLogger(
         level="info",
         options={"execution_environment": ExecutionEnvironmentType.FARGATE},
