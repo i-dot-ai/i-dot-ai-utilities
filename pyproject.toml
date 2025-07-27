@@ -27,10 +27,11 @@ classifiers = [
 ]
 
 dependencies = [
+    "pydantic>=2.11.7",
+    "pydantic-settings>=2.10.1",
     "boto3>=1.38.35",
     "litellm>=1.74.0.post1",
     "minio>=7.2.15",
-    "pydantic-settings>=2.9.1",
     "requests>=2.32.3",
     "structlog>=25.4.0",
 ]
@@ -132,3 +133,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/i_dot_ai_utilities"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
+]

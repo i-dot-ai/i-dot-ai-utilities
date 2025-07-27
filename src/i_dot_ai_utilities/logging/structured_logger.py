@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from i_dot_ai_utilities.logging.enrichers.context_extractor import (
+    ExtractedContextResult,
+)
 from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     EnrichmentProvider,
     ExecutionEnvironmentType,
@@ -14,9 +17,6 @@ from i_dot_ai_utilities.logging.types.context_enrichment_options import (
     ContextEnrichmentOptions,
 )
 from i_dot_ai_utilities.logging.types.context_fields import ContextFieldValue
-from i_dot_ai_utilities.logging.types.fargate_enrichment_schema import (
-    ExtractedFargateContext,
-)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigOptions
 
@@ -215,7 +215,7 @@ class StructuredLogger:
             )
             return message_template
 
-    def _set_environment_context(self, environment_context: ExtractedFargateContext | None) -> None:
+    def _set_environment_context(self, environment_context: ExtractedContextResult) -> None:
         if environment_context:
             structlog.contextvars.bind_contextvars(**environment_context)
 
@@ -232,9 +232,11 @@ class StructuredLogger:
 
         base_context: BaseContext = {
             "context_id": str(uuid.uuid4()),
-            "env_app_name": os.environ.get("APP_NAME", "unknown"),
-            "env_repo_name": os.environ.get("REPO", "unknown"),
-            "env_environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            "env": {
+                "app_name": os.environ.get("APP_NAME", "unknown"),
+                "repo_name": os.environ.get("REPO", "unknown"),
+                "environment_name": os.environ.get("ENVIRONMENT", "unknown"),
+            },
             "ship_logs": 1 if self._ship_logs else 0,
         }
         structlog.contextvars.bind_contextvars(**base_context)

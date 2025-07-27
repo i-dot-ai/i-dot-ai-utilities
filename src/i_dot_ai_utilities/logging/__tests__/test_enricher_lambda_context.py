@@ -1,42 +1,33 @@
 # mypy: disable-error-code="no-untyped-def"
 
 import json
+from types import SimpleNamespace
 
 import pytest
-from starlette.requests import Request
 
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.logging.types.enrichment_types import (
     ContextEnrichmentType,
     ExecutionEnvironmentType,
 )
+from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import LambdaContextLike
 
 
 @pytest.fixture
-def load_test_request_object() -> Request:
-    scope = {
-        "type": "http",
-        "method": "GET",
-        "path": "/logger/unit/testing",
-        "headers": [(b"user-agent", b"test agent")],
-        "query_string": b"islogger=true&istest=true",
-        "client": ("testclient", 50000),
-        "server": ("testserver", 80),
-        "scheme": "http",
-        "root_path": "",
-        "http_version": "1.1",
-        "asgi": {"spec_version": "2.1", "version": "3.0"},
-    }
-    return Request(scope)
+def load_test_request_object() -> LambdaContextLike:
+    return SimpleNamespace(
+        aws_request_id="abc123",
+        invoked_function_arn="arn:aws:foo:bar:lambda/baz",
+    )
 
 
-def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_object, capsys):
+def test_lambda_context_enriched_logger_contains_expected_fields(load_test_request_object, capsys):
     logger = StructuredLogger(level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL})
 
     logger.refresh_context(
         context_enrichers=[
             {
-                "type": ContextEnrichmentType.FASTAPI,
+                "type": ContextEnrichmentType.LAMBDA,
                 "object": load_test_request_object,
             }
         ]
@@ -51,17 +42,14 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    req_object = (parsed[0]).get("request")
+    req_object = (parsed[0]).get("lambda_context")
 
-    assert (req_object).get("method") == "GET"
-    assert (req_object).get("base_url") == "http://testserver/"
-    assert (req_object).get("path") == "/logger/unit/testing"
-    assert (req_object).get("user_agent") == "test agent"
-    assert (req_object).get("query") == "islogger=true&istest=true"
+    assert (req_object).get("request_id") == "abc123"
+    assert (req_object).get("function_arn") == "arn:aws:foo:bar:lambda/baz"
 
 
 @pytest.mark.parametrize(
-    "fastpi_request_object_value",
+    "lambda_context_object_value",
     [
         {"a_dummy_response": True},
         None,
@@ -69,14 +57,14 @@ def test_fastapi_enriched_logger_contains_expected_fields(load_test_request_obje
         "blah",
     ],
 )
-def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value, capsys):
+def test_fastapi_enrichment_handles_malformed_object(lambda_context_object_value, capsys):
     logger = StructuredLogger(level="info", options={"execution_environment": ExecutionEnvironmentType.LOCAL})
 
     logger.refresh_context(
         context_enrichers=[
             {
-                "type": ContextEnrichmentType.FASTAPI,
-                "object": fastpi_request_object_value,
+                "type": ContextEnrichmentType.LAMBDA,
+                "object": lambda_context_object_value,
             }
         ]
     )
@@ -91,7 +79,7 @@ def test_fastapi_enrichment_handles_malformed_object(fastpi_request_object_value
     for line in log_lines:
         parsed.append(json.loads(line))
 
-    assert "doesn't conform to RequestLike. Context not set" in parsed[0].get("exception")
+    assert "doesn't conform to LambdaContextLike. Context not set" in parsed[0].get("exception")
     assert parsed[0].get("level") == "error"
 
     assert parsed[1].get("message") == log_message

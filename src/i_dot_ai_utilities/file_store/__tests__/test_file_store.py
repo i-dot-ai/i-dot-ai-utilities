@@ -5,21 +5,18 @@ import pytest
 from i_dot_ai_utilities.file_store.main import FileStore
 
 
-@pytest.mark.order(1)
 @pytest.mark.usefixtures("client", "bucket")
 def test_create_file(file_store: FileStore) -> None:
     response = file_store.create_object("test_file.txt", "file_content", metadata={"metadata": "metadata"})
     assert response
 
 
-@pytest.mark.order(2)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_read_file(file_store: FileStore) -> None:
     response = file_store.read_object("test_file.txt", True)
     assert response == "file_content"
 
 
-@pytest.mark.order(3)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_copy_object(file_store: FileStore) -> None:
     copy_response = file_store.copy_object("test_file.txt", "test_file2.txt")
@@ -29,7 +26,6 @@ def test_copy_object(file_store: FileStore) -> None:
     assert read_response == "file_content"
 
 
-@pytest.mark.order(4)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_list_objects(file_store: FileStore) -> None:
     copy_response = file_store.copy_object("test_file.txt", "test_file2.txt")
@@ -40,21 +36,18 @@ def test_list_objects(file_store: FileStore) -> None:
     assert file_keys == ["app_data/test_file.txt", "app_data/test_file2.txt"]
 
 
-@pytest.mark.order(5)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_delete_object(file_store: FileStore) -> None:
     response = file_store.delete_object("test_file.txt")
     assert response
 
 
-@pytest.mark.order(6)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_object_metadata(file_store: FileStore) -> None:
     response: dict = file_store.get_object_metadata("test_file.txt")  # type: ignore[assignment]
     assert response["metadata"] == {"metadata": "metadata"}
 
 
-@pytest.mark.order(7)
 @pytest.mark.usefixtures("client", "bucket")
 def test_json_upload_file(file_store: FileStore) -> None:
     file_json_content = {"file_content": "json_content"}
@@ -66,7 +59,6 @@ def test_json_upload_file(file_store: FileStore) -> None:
     assert read_response == '{\n  "file_content": "json_content"\n}'
 
 
-@pytest.mark.order(8)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_update_object(file_store: FileStore) -> None:
     update_response = file_store.update_object(
@@ -78,7 +70,6 @@ def test_update_object(file_store: FileStore) -> None:
     assert read_response == "file_content but updated"
 
 
-@pytest.mark.order(9)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_get_pre_signed_url(file_store: FileStore) -> None:
     response: str | None = file_store.get_pre_signed_url("test_file.txt")
@@ -86,14 +77,12 @@ def test_get_pre_signed_url(file_store: FileStore) -> None:
     assert response.startswith("http://localhost:9000/test-bucket/app_data/test_file.txt?X-Amz-Algorithm")
 
 
-@pytest.mark.order(10)
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_object_exists(file_store: FileStore) -> None:
     response = file_store.object_exists("test_file.txt")
     assert response
 
 
-@pytest.mark.order(11)
 @pytest.mark.usefixtures("client", "bucket")
 def test_file_doesnt_exist(file_store: FileStore) -> None:
     response = file_store.list_objects("test")
@@ -101,14 +90,12 @@ def test_file_doesnt_exist(file_store: FileStore) -> None:
     assert "app_data/test_file5.txt" not in file_keys
 
 
-@pytest.mark.order(12)
 @pytest.mark.usefixtures("client", "bucket")
 def test_get_none_pre_signed_url(file_store: FileStore) -> None:
     response = file_store.get_pre_signed_url("test_file6.txt")
     assert response is None
 
 
-@pytest.mark.order(13)
 @pytest.mark.usefixtures("client", "bucket")
 def test_get_empty_json_object(file_store: FileStore) -> None:
     create_response = file_store.create_object("test_file.txt", "")
