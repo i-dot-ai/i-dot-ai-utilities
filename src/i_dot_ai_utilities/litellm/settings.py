@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     api_base: str = Field(description="Custom API base URL")
     api_version: str | None = Field(default=None, description="Custom API base URL")
     organisation: str | None = Field(default=None, description="LiteLLM organisation")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for generation")
+    temperature: float = Field(default=1.0, ge=0.0, le=2.0, description="Temperature for generation")
     max_tokens: int | None = Field(default=None, description="Maximum tokens to generate")
     timeout: int = Field(default=30, description="Request timeout in seconds")
     langfuse_public_key: str | None = Field(default=None, description="Public key for langfuse")

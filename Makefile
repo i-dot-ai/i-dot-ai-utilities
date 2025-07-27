@@ -6,6 +6,10 @@ run_backing_services:
 
 test:
 	export IAI_FS_BUCKET_NAME=test-bucket && \
+	export IAI_LITELLM_API_KEY=sk-1234567890abcdef && \
+	export LITELLM_MASTER_KEY=sk-1234567890abcdef && \
+	export IAI_LITELLM_CHAT_MODEL=azure/o4-mini && \
+	export IAI_LITELLM_EMBEDDING_MODEL=text-embedding-3-small && \
 	docker compose up -d --wait && \
 	PACKAGE_DIRS="logging,metrics,file_store,litellm"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
