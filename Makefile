@@ -6,6 +6,7 @@ run_backing_services:
 
 test:
 	export IAI_FS_BUCKET_NAME=test-bucket && \
+	export IAI_LITELLM_API_BASE=http://localhost:4000 && \
 	export IAI_LITELLM_API_KEY=sk-1234567890abcdef && \
 	export LITELLM_MASTER_KEY=sk-1234567890abcdef && \
 	export IAI_LITELLM_CHAT_MODEL=azure/o4-mini && \

@@ -31,9 +31,9 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - AZURE_OPENAI_ENDPOINT
+      - AZURE_OPENAI_API_KEY
+      - LITELLM_MASTER_KEY
     volumes:
       - ./litellm-config.yaml:/app/config.yaml
     command: [ "--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1" ]
