@@ -3,7 +3,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model: str = Field(default="gpt-3.5-turbo", description="Default model to use")
+    chat_model: str = Field(default="o4-mini", description="Default model to use for chat completions")
+    embedding_model: str = Field(
+        default="text-embedding-3-small", description="Default model to use for text embedding"
+    )
     api_key: str = Field(description="API key for the service")
     api_base: str = Field(description="Custom API base URL")
     api_version: str | None = Field(default=None, description="Custom API base URL")
