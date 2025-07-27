@@ -1,9 +1,12 @@
 -include .env
 export
 
+run_backing_services:
+	docker compose up -d --wait
+
 test:
-	docker compose -d --wait up minio && \
-	PACKAGE_DIRS="logging,metrics,file_store"; \
+	docker compose up -d --wait minio litellm && \
+	PACKAGE_DIRS="logging,metrics,file_store,litellm"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
