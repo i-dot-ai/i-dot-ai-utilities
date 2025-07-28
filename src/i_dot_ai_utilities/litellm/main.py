@@ -98,25 +98,26 @@ class LiteLLMHandler:
                 stream=should_stream,
                 **kwargs,
             )
-            self.logger.set_context_field("model", model or self.chat_model)
-            if response.impacts:
-                self.logger.set_context_field(
-                    f"Electricity Total ({response.impacts.energy.unit})", response.impacts.energy.value
-                )
-                self.logger.set_context_field(
-                    f"Global Warming Potential ({response.impacts.gwp.unit})", response.impacts.gwp.value
-                )
-                self.logger.set_context_field(
-                    f"Abiotic Resource Depletion ({response.impacts.adpe.unit})", response.impacts.adpe.value
-                )
-                self.logger.set_context_field(
-                    f"Primary Source Energy({response.impacts.pe.unit})", response.impacts.pe.value
-                )
             self.logger.info(
                 "Chat completion called for model {model}, with {number_of_messages} messages",
                 model=model or self.chat_model,
                 number_of_messages=len(messages),
             )
+            if response.impacts:
+                self.logger.info(
+                    "Carbon cost for completion call: Electricity total {electricity_unit}: {electricity_value}."
+                    "Global warming potential {gwp_unit}: {gwp_value}."
+                    "Abiotic resource depletion {adpe_unit}: {adpe_value}."
+                    "Primary source energy used {pe_unit}: {pe_value}",
+                    electricity_unit=response.impacts.energy.unit,
+                    electricity_value=response.impacts.energy.value,
+                    gwp_unit=response.impacts.gwp.unit,
+                    gwp_value=response.impacts.gwp.value,
+                    adpe_unit=response.impacts.adpe.unit,
+                    adpe_value=response.impacts.adpe.value,
+                    pe_unit=response.impacts.pe.unit,
+                    pe_value=response.impacts.pe.value,
+                )
         except BadRequestError as e:
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 400) from e
