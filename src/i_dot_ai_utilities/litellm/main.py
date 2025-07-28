@@ -2,7 +2,8 @@ from typing import Any
 
 import litellm
 import requests
-from litellm import BadRequestError, check_valid_key, completion, embedding
+from ecologits import EcoLogits
+from litellm import BadRequestError, check_valid_key
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.llms.openai.common_utils import OpenAIError
 from litellm.types.utils import EmbeddingResponse, ModelResponse
@@ -55,6 +56,8 @@ class LiteLLMHandler:
             response = requests.get(settings.api_base, timeout=60)
             response.raise_for_status()
             self.logger.info("LiteLLM configured and reachable on {api_base}", api_base=settings.api_base)
+            EcoLogits.init(providers=["litellm"])
+            self.logger.info("Ecologits added for litellm, using WOR energy zone")
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
@@ -87,7 +90,7 @@ class LiteLLMHandler:
             if not model and not _check_chat_model_is_callable(self.chat_model, self.logger):
                 raise ModelNotAvailableError("The default model is not available on this api key", 401)
 
-            return completion(
+            response = litellm.completion(
                 model=model or self.chat_model,
                 messages=messages,
                 temperature=temperature or settings.temperature,
@@ -95,12 +98,33 @@ class LiteLLMHandler:
                 stream=should_stream,
                 **kwargs,
             )
+            self.logger.set_context_field("model", model or self.chat_model)
+            if response.impacts:
+                self.logger.set_context_field(
+                    f"Electricity Total ({response.impacts.energy.unit})", response.impacts.energy.value
+                )
+                self.logger.set_context_field(
+                    f"Global Warming Potential ({response.impacts.gwp.unit})", response.impacts.gwp.value
+                )
+                self.logger.set_context_field(
+                    f"Abiotic Resource Depletion ({response.impacts.adpe.unit})", response.impacts.adpe.value
+                )
+                self.logger.set_context_field(
+                    f"Primary Source Energy({response.impacts.pe.unit})", response.impacts.pe.value
+                )
+            self.logger.info(
+                "Chat completion called for model {model}, with {number_of_messages} messages",
+                model=model or self.chat_model,
+                number_of_messages=len(messages),
+            )
         except BadRequestError as e:
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 400) from e
         except OpenAIError as e:
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 500) from e
+        else:
+            return response
 
     def get_embedding(self, text: str, model: str | None = None, **kwargs: dict[str, Any]) -> EmbeddingResponse:
         """
@@ -116,7 +140,7 @@ class LiteLLMHandler:
 
         # LiteLLM doesn't support any way to pre-validate an embedding model
         try:
-            response = embedding(model=model or self.embedding_model, input=text, **kwargs)
+            response = litellm.embedding(model=model or self.embedding_model, input=text, **kwargs)
         except BadRequestError as e:
             self.logger.exception("Failed to get embedding")
             raise MiscellaneousLiteLLMError(str(e), 400) from e
