@@ -105,18 +105,23 @@ class LiteLLMHandler:
             )
             if response.impacts:
                 self.logger.info(
-                    "Carbon cost for completion call: Electricity total {electricity_unit}: {electricity_value}."
-                    "Global warming potential {gwp_unit}: {gwp_value}."
-                    "Abiotic resource depletion {adpe_unit}: {adpe_value}."
-                    "Primary source energy used {pe_unit}: {pe_value}",
+                    "Carbon cost for completion call: Electricity total {electricity_unit}: "
+                    "{electricity_value_min} to {electricity_value_max}. "
+                    "Global warming potential {gwp_unit}: {gwp_value_min} to {gwp_value_max}. "
+                    "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
+                    "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
                     electricity_unit=response.impacts.energy.unit,
-                    electricity_value=response.impacts.energy.value,
+                    electricity_value_min=response.impacts.energy.value.min,
+                    electricity_value_max=response.impacts.energy.value.max,
                     gwp_unit=response.impacts.gwp.unit,
-                    gwp_value=response.impacts.gwp.value,
+                    gwp_value_min=response.impacts.gwp.value.min,
+                    gwp_value_max=response.impacts.gwp.value.max,
                     adpe_unit=response.impacts.adpe.unit,
-                    adpe_value=response.impacts.adpe.value,
+                    adpe_value_min=response.impacts.adpe.value.min,
+                    adpe_value_max=response.impacts.adpe.value.max,
                     pe_unit=response.impacts.pe.unit,
-                    pe_value=response.impacts.pe.value,
+                    pe_value_min=response.impacts.pe.value.min,
+                    pe_value_max=response.impacts.pe.value.max,
                 )
         except BadRequestError as e:
             self.logger.exception("Failed to get chat completion")
