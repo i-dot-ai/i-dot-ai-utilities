@@ -21,13 +21,33 @@ There's also a handy interface provided which can be used in your code to allow 
 
 You can find information on usage of the metrics collection library in the [metrics library readme](./src/i_dot_ai_utilities/metrics/README.md).
 
+#### File store
+
+The file store library currently only supports aws s3 as this is the main/only file store that we use in anger.
+
+It can be used to upload and download files, and generate file download links for end-users to use.
+
+The aim is to be able to plug more file storage destinations into this module so it can be swapped out easily.
+
+You can find out information on usage of the file store library in the [file store library readme](./src/i_dot_ai_utilities/file_store/README.md).
+
+#### LiteLLM
+
+This library currently supports LLM proxy through LiteLLM, for chat and embedding functions.
+
+The hope for this library is to easily swap between proxies for whichever is best-in-market at the time.
+
+As the end-user, you'll have to make sure that the API key issued to you by LiteLLM will support the models you're trying to use.
+
+More information on usage and setup can be found in the [litellm library readme](./src/i_dot_ai_utilities/litellm/README.md).
+
 ### Future features:
 
-- keycloak authentication
-- s3
-- langfuse and litellm
-- logging/observability
+- authentication
+- authorisation
+- s3 vector store
 - opensearch
+- ecologits for llm call carbon tracking
 
 ## Settings
 
