@@ -89,8 +89,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.debug(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.debug(message, message_template=message_template, **safe_kwargs)
 
     def info(self, message_template: str, **kwargs: Any) -> None:
         """Write an informational log message.
@@ -126,8 +127,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.warning(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.warning(message, message_template=message_template, **safe_kwargs)
 
     def error(self, message_template: str, **kwargs: Any) -> None:
         """Write an error log message.
@@ -143,8 +145,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.error(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.error(message, message_template=message_template, **safe_kwargs)
 
     def exception(self, message_template: str, **kwargs: Any) -> None:
         """Write a caught exception, along with an error log message. Caught exceptions will automatically be added as context to the log message.
@@ -157,8 +160,9 @@ class StructuredLogger:
 
         logger.exception('User {email} failed to update in DB', email='me@example.com') # Log output: {"message": User me@example.com failed to update in DB", "email": "me@example.com", "exception": "Traceback ..."}
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.exception(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.exception(message, message_template=message_template, **safe_kwargs)
 
     def set_context_field(self, field_key: str, field_value: ContextFieldValue) -> None:
         """Add a custom field to the logger dictionary. This field will appear on subsequent log messages.
