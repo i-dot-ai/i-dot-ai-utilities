@@ -189,41 +189,6 @@ def test_context_refresh_resets_context(capsys):
     assert parsed[1].get("context_id") == parsed[2].get("context_id")
 
 
-# def test_log_output_normalises_dictionary(capsys):
-#     logger = StructuredLogger(
-#         logging.INFO,
-#         options={
-#             "execution_environment": ExecutionEnvironmentType.LOCAL,
-#         },
-#     )
-
-#     nested_dict = {
-#         "first_key": {
-#             "second_key": "second_value"
-#         }
-#     }
-
-#     nested_list = [
-#         ["first_entry", "second_entry"]
-#     ]
-
-#     logger.info("dict message with payload {payload}", payload=nested_dict)
-#     logger.info("list message with payload {payload}", payload=nested_list)
-
-#     captured = capsys.readouterr()
-#     log_lines = captured.out.strip().splitlines()
-
-#     parsed = []
-#     for line in log_lines:
-#         parsed.append(json.loads(line))
-
-#     assert type(parsed[0].get("payload")) == str
-#     assert parsed[0].get("payload") == '{"first_key": {"second_key": "second_value"}}'
-
-#     assert type(parsed[1].get("payload")) == str
-#     assert parsed[1].get("payload") == '[["first_entry", "second_entry"]]'
-
-
 def test_set_context_field_and_normalises_dictionary(capsys):
     logger = StructuredLogger(
         logging.INFO,
