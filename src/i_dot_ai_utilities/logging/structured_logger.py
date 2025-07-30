@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import uuid
@@ -105,8 +106,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.info(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.info(message, message_template=message_template, **safe_kwargs)
 
     def warning(self, message_template: str, **kwargs: Any) -> None:
         """Write a warning log message.
@@ -168,7 +170,8 @@ class StructuredLogger:
         :param field_key: The key of the field.
         :param field_value: The value of the field.
         """
-        structlog.contextvars.bind_contextvars(**{field_key: field_value})
+        safe_kwargs = self._normalise_kwargs(**{field_key: field_value})
+        structlog.contextvars.bind_contextvars(**safe_kwargs)
 
     def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
@@ -204,6 +207,9 @@ class StructuredLogger:
             return False
 
         return selected_option
+
+    def _normalise_kwargs(self, **kwargs: Any) -> dict[str, str]:
+        return {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict | list)) else v for k, v in kwargs.items()}
 
     def _get_interpolated_message(self, message_template: str, **kwargs: Any) -> str:
         try:

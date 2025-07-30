@@ -119,10 +119,13 @@ def test_log_message_interpolation_works_and_fields_added(capsys):
     assert parsed[0].get("id") == user_id
 
     assert isinstance(parsed[1].get("message"), str)
-    assert parsed[1].get("test_dict").get("foo").get("bar") == "baz"
-
     assert isinstance(parsed[2].get("message"), str)
-    assert parsed[2].get("test_array")[4][1] == "test_item"
+
+    assert isinstance(parsed[1].get("test_dict"), str)
+    assert parsed[1].get("test_dict") == '{"foo": {"bar": "baz"}}'
+
+    assert isinstance(parsed[2].get("test_array"), str)
+    assert parsed[2].get("test_array") == '[0, 1, 2, 3, [4, "test_item"], 5]'
 
 
 def test_string_interpolation_failure_handled_by_logger(capsys):
@@ -184,3 +187,82 @@ def test_context_refresh_resets_context(capsys):
 
     assert parsed[0].get("context_id") != parsed[1].get("context_id")
     assert parsed[1].get("context_id") == parsed[2].get("context_id")
+
+
+# def test_log_output_normalises_dictionary(capsys):
+#     logger = StructuredLogger(
+#         logging.INFO,
+#         options={
+#             "execution_environment": ExecutionEnvironmentType.LOCAL,
+#         },
+#     )
+
+#     nested_dict = {
+#         "first_key": {
+#             "second_key": "second_value"
+#         }
+#     }
+
+#     nested_list = [
+#         ["first_entry", "second_entry"]
+#     ]
+
+#     logger.info("dict message with payload {payload}", payload=nested_dict)
+#     logger.info("list message with payload {payload}", payload=nested_list)
+
+#     captured = capsys.readouterr()
+#     log_lines = captured.out.strip().splitlines()
+
+#     parsed = []
+#     for line in log_lines:
+#         parsed.append(json.loads(line))
+
+#     assert type(parsed[0].get("payload")) == str
+#     assert parsed[0].get("payload") == '{"first_key": {"second_key": "second_value"}}'
+
+#     assert type(parsed[1].get("payload")) == str
+#     assert parsed[1].get("payload") == '[["first_entry", "second_entry"]]'
+
+
+def test_set_context_field_and_normalises_dictionary(capsys):
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
+
+    nested_dict = {"first_key": {"second_key": "second_value"}}
+
+    nested_list = [["first_entry", "second_entry"]]
+
+    logger.set_context_field("dictionary", nested_dict)
+    logger.set_context_field("list", nested_list)
+
+    logger.info("first message")
+
+    logger.refresh_context()
+
+    logger.info("second message")
+
+    captured = capsys.readouterr()
+    log_lines = captured.out.strip().splitlines()
+
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    first_message = parsed[0]
+    second_message = parsed[1]
+
+    assert first_message.get("message") == "first message"
+
+    assert isinstance(first_message.get("dictionary"), str)
+    assert first_message.get("dictionary") == '{"first_key": {"second_key": "second_value"}}'
+
+    assert isinstance(first_message.get("list"), str)
+    assert first_message.get("list") == '[["first_entry", "second_entry"]]'
+
+    assert second_message.get("message") == "second message"
+    assert "dictionary" not in second_message
+    assert "list" not in second_message
