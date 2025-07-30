@@ -23,9 +23,8 @@ from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigO
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
-    from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
-        ExtractedFastApiContext,
-    )
+    from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import ExtractedFastApiContext
+    from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import ExtractedLambdaContext
 
 
 class StructuredLogger:
@@ -188,7 +187,7 @@ class StructuredLogger:
         if context_enrichers is None:
             return
 
-        additional_context: ExtractedFastApiContext | dict[str, Any] = {}
+        additional_context: ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any] = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]
