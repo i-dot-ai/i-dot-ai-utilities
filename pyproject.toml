@@ -138,8 +138,8 @@ packages = ["src/i_dot_ai_utilities"]
 filterwarnings = [
     "error",
     "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth",
-#    "ignore::UserWarning:pydantic.*",
-#    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
-#    "ignore:.*Expected.*fields but got.*:UserWarning",
-#    "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
+    "ignore::UserWarning:pydantic.*",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore:.*Expected.*fields but got.*:UserWarning",
+    "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
 ]
