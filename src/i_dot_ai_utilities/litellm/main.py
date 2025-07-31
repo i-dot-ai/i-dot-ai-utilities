@@ -4,6 +4,7 @@ from typing import Any
 import litellm
 import requests
 from codecarbon import EmissionsTracker
+from codecarbon.core.units import Energy
 from litellm import BadRequestError, check_valid_key
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.llms.openai.common_utils import OpenAIError
@@ -60,7 +61,7 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
-    def __log_carbon_info(self, message: str, carbon_info: dict[str, float | None]):
+    def __log_carbon_info(self, message: str, carbon_info: dict[str, float | None | Energy]):
         self.logger.info(
             "{message}"
             "Emissions CO2 kg: {emissions_kg_co2}. "
@@ -143,6 +144,7 @@ class LiteLLMHandler:
                 temperature=temperature or settings.temperature,
                 max_tokens=max_tokens or settings.max_tokens,
                 stream=should_stream,
+                stream_options={"include_usage": True} if should_stream else None,
                 **kwargs,
             )
             self.logger.info(
@@ -162,6 +164,14 @@ class LiteLLMHandler:
             emissions = tracker.stop()
             end_time = time.perf_counter()
 
+        if should_stream:
+            #  Iterate chunks to force usage to update on final chunk
+            for _ in response:
+                pass
+            actual_token_usage = response.chunks[-1].usage
+        else:
+            actual_token_usage = response.usage.total_tokens
+
         carbon_info = {
             "emissions_kg_co2": emissions,
             "duration_seconds": end_time - start_time,
@@ -178,7 +188,7 @@ class LiteLLMHandler:
             "model_used": model or self.chat_model,
             "text_length": sum(len(message["content"]) for message in messages) or 0,
             "text_token_estimate": None,  # Estimating chat is far more complex than embedding, so leave empty
-            "actual_token_usage": response.usage.total_tokens,
+            "actual_token_usage": actual_token_usage,
         }
 
         self.__log_carbon_info("Carbon cost for chat completion call: ", carbon_info)
