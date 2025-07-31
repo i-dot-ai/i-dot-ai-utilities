@@ -60,7 +60,7 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
-    def __log_carbon_info(self, message: str, carbon_info: dict[str, Any]):
+    def __log_carbon_info(self, message: str, carbon_info: dict[str, float | None]):
         self.logger.info(
             "{message}"
             "Emissions CO2 kg: {emissions_kg_co2}. "
