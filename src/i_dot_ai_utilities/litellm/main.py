@@ -198,7 +198,6 @@ class LiteLLMHandler:
     def get_embedding(self, text: str, model: str | None = None, **kwargs: dict[str, Any]) -> EmbeddingResponse:
         """
         Method for embedding given text with carbon tracking
-        :param project_name: The project name to attach to tracked emissions
         :param text: The text to embed
         :param model: The model to use for embedding, or defaults to environment variable model
         :param kwargs: Any kwargs to pass to the embedding call
