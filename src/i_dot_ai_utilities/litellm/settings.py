@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     )
     api_key: str = Field(description="API key for the service")
     api_base: str = Field(description="Custom API base URL")
+    project_name: str = Field(description="Project name for carbon tracking, set to the app name or repo name")
     api_version: str | None = Field(default=None, description="Custom API base URL")
     organisation: str | None = Field(default=None, description="LiteLLM organisation")
     temperature: float = Field(default=1.0, ge=0.0, le=2.0, description="Temperature for generation")
