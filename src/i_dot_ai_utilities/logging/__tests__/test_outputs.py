@@ -2,6 +2,7 @@
 
 import json
 import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -231,3 +232,37 @@ def test_set_context_field_and_normalises_dictionary(capsys):
     assert second_message.get("message") == "second message"
     assert "dictionary" not in second_message
     assert "list" not in second_message
+
+
+@patch("i_dot_ai_utilities.logging.structured_logger.json.dumps")
+def test_normalisation_failure_raises_exception_and_logs_message_without_inputs(mock_json_response, capsys):
+    mock_json_response.side_effect = KeyError("simulated failure")
+
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
+
+    logger.info("message {key}", key={"foo": "bar"})
+
+    logger.info("Final test message")
+
+    captured = capsys.readouterr()
+    log_lines = captured.out.strip().splitlines()
+
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    assert "Exception(Logger): Failed to normalise kwargs" in parsed[0].get("message")
+    assert "KeyError: 'simulated failure'" in parsed[0].get("exception")
+
+    assert "Exception(Logger): Variable interpolation failed" in parsed[1].get("message")
+
+    assert parsed[2].get("message") == "message {key}"
+    assert parsed[2].get("message_template") == "message {key}"
+    assert "key" not in parsed[2]
+
+    assert parsed[3].get("message") == "Final test message"

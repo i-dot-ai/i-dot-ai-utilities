@@ -212,7 +212,17 @@ class StructuredLogger:
         return selected_option
 
     def _normalise_kwargs(self, **kwargs: Any) -> dict[str, str]:
-        return {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict | list)) else v for k, v in kwargs.items()}
+        try:
+            return {
+                k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict | list)) else v for k, v in kwargs.items()
+            }
+        except Exception:
+            msg = (
+                "Exception(Logger): Failed to normalise kwargs. "
+                "Ensure the data input to the logger is valid. Inputs dropped."
+            )
+            self._logger.exception(msg, message_template=msg)
+            return {}
 
     def _get_interpolated_message(self, message_template: str, **kwargs: Any) -> str:
         try:
