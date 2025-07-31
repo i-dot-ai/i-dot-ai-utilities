@@ -266,3 +266,30 @@ def test_normalisation_failure_raises_exception_and_logs_message_without_inputs(
     assert "key" not in parsed[2]
 
     assert parsed[3].get("message") == "Final test message"
+
+
+@patch("i_dot_ai_utilities.logging.structured_logger.json.dumps")
+def test_normalisation_failure_handled_when_set_context_field_called(mock_json_response, capsys):
+    mock_json_response.side_effect = KeyError("simulated failure")
+
+    logger = StructuredLogger(
+        logging.INFO,
+        options={
+            "execution_environment": ExecutionEnvironmentType.LOCAL,
+        },
+    )
+
+    logger.set_context_field("foo", {"bar": "baz"})
+    logger.info("test message")
+
+    captured = capsys.readouterr()
+    log_lines = captured.out.strip().splitlines()
+
+    parsed = []
+    for line in log_lines:
+        parsed.append(json.loads(line))
+
+    assert "Exception(Logger): Failed to normalise kwargs" in parsed[0].get("message")
+
+    assert parsed[1].get("message") == "test message"
+    assert "foo" not in parsed[1]
