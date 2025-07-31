@@ -4,7 +4,6 @@ from typing import Any
 import litellm
 import requests
 from codecarbon import EmissionsTracker
-from ecologits import EcoLogits
 from litellm import BadRequestError, check_valid_key
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.llms.openai.common_utils import OpenAIError
@@ -58,8 +57,6 @@ class LiteLLMHandler:
             response = requests.get(settings.api_base, timeout=60)
             response.raise_for_status()
             self.logger.info("LiteLLM configured and reachable on {api_base}", api_base=settings.api_base)
-            EcoLogits.init(providers=["litellm"])
-            self.logger.info("Ecologits added for litellm, using WOR energy zone")
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
