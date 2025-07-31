@@ -1,7 +1,9 @@
+import time
 from typing import Any
 
 import litellm
 import requests
+from codecarbon import EmissionsTracker
 from ecologits import EcoLogits
 from litellm import BadRequestError, check_valid_key
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
@@ -84,6 +86,16 @@ class LiteLLMHandler:
         :raises MiscellaneousLiteLLMException: occurs when the called method in the
         litellm sdk returns a generic openai exception
         """
+        tracker = EmissionsTracker(
+            project_name=settings.project_name,
+            measure_power_secs=1,
+            save_to_file=False,
+            logging_logger=None,
+        )
+
+        start_time = time.perf_counter()
+        tracker.start()
+
         try:
             if model and not _check_chat_model_is_callable(model, self.logger):
                 raise ModelNotAvailableError("The given model is not available on this api key", 401)
@@ -103,38 +115,78 @@ class LiteLLMHandler:
                 model=model or self.chat_model,
                 number_of_messages=len(messages),
             )
-            if response.impacts:
-                self.logger.info(
-                    "Carbon cost for completion call: Electricity total {electricity_unit}: "
-                    "{electricity_value_min} to {electricity_value_max}. "
-                    "Global warming potential {gwp_unit}: {gwp_value_min} to {gwp_value_max}. "
-                    "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
-                    "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
-                    electricity_unit=response.impacts.energy.unit,
-                    electricity_value_min=response.impacts.energy.value.min,
-                    electricity_value_max=response.impacts.energy.value.max,
-                    gwp_unit=response.impacts.gwp.unit,
-                    gwp_value_min=response.impacts.gwp.value.min,
-                    gwp_value_max=response.impacts.gwp.value.max,
-                    adpe_unit=response.impacts.adpe.unit,
-                    adpe_value_min=response.impacts.adpe.value.min,
-                    adpe_value_max=response.impacts.adpe.value.max,
-                    pe_unit=response.impacts.pe.unit,
-                    pe_value_min=response.impacts.pe.value.min,
-                    pe_value_max=response.impacts.pe.value.max,
-                )
         except BadRequestError as e:
+            tracker.stop()
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 400) from e
         except OpenAIError as e:
+            tracker.stop()
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 500) from e
         else:
-            return response
+            emissions = tracker.stop()
+            end_time = time.perf_counter()
+
+        carbon_info = {
+            "emissions_kg_co2": emissions,
+            "duration_seconds": end_time - start_time,
+            "energy_consumed_kwh": getattr(tracker, "_total_energy", None),
+            "cpu_energy_kwh": getattr(tracker, "_cpu_energy", None),
+            "gpu_energy_kwh": getattr(tracker, "_gpu_energy", None),
+            "ram_energy_kwh": getattr(tracker, "_ram_energy", None),
+            "cpu_power_watts": getattr(tracker, "_last_measured_cpu_power", None),
+            "gpu_power_watts": getattr(tracker, "_last_measured_gpu_power", None),
+            "ram_power_watts": getattr(tracker, "_last_measured_ram_power", None),
+            "carbon_intensity_g_per_kwh": getattr(tracker, "_carbon_intensity", None),
+            "country_name": getattr(tracker, "_country_name", None),
+            "region": getattr(tracker, "_region", None),
+            "model_used": model or self.chat_model,
+            "text_length": sum(len(message["content"]) for message in messages) or 0,
+            "text_token_estimate": None,  # Estimating chat is far more complex than embedding, so leave empty
+        }
+
+        self.logger.info(
+            "Carbon cost for embedding call: "
+            "Emissions CO2 kg: {emissions_kg_co2}. "
+            "Duration seconds: {duration_seconds}. "
+            "Electricity total kWh: {energy_consumed}. "
+            "CPU energy kwh: {cpu_energy_kwh}. "
+            "GPU energy kwh: {gpu_energy_kwh}. "
+            "RAM energy kwh: {ram_energy_kwh}. "
+            "CPU power watts: {cpu_power_watts}. "
+            "GPU power watts: {gpu_power_watts}. "
+            "RAM power watts: {ram_power_watts}. "
+            "Carbon intensity g/kwh: {carbon_intensity_g_per_kwh}. "
+            "Country name: {country_name}. "
+            "Region: {region}. "
+            "Model used: {model_used}. "
+            "Text length: {text_length}. "
+            "Token estimate: {text_token_estimate}. "
+            "Actual token usage: {actual_token_usage}.",
+            emissions_kg_co2=carbon_info["emissions_kg_co2"],
+            duration_seconds=carbon_info["duration_seconds"],
+            energy_consumed=carbon_info["energy_consumed_kwh"].kWh,
+            cpu_energy_kwh=carbon_info["cpu_energy_kwh"],
+            gpu_energy_kwh=carbon_info["gpu_energy_kwh"],
+            ram_energy_kwh=carbon_info["ram_energy_kwh"],
+            cpu_power_watts=carbon_info["cpu_power_watts"],
+            gpu_power_watts=carbon_info["gpu_power_watts"],
+            ram_power_watts=carbon_info["ram_power_watts"],
+            carbon_intensity_g_per_kwh=carbon_info["carbon_intensity_g_per_kwh"],
+            country_name=carbon_info["country_name"],
+            region=carbon_info["region"],
+            model_used=carbon_info["model_used"],
+            text_length=carbon_info["text_length"],
+            text_token_estimate=carbon_info["text_token_estimate"],
+            actual_token_usage=response.usage.total_tokens,
+        )
+
+        return response
 
     def get_embedding(self, text: str, model: str | None = None, **kwargs: dict[str, Any]) -> EmbeddingResponse:
         """
-        Async method for embedding given text
+        Method for embedding given text with carbon tracking
+        :param project_name: The project name to attach to tracked emissions
         :param text: The text to embed
         :param model: The model to use for embedding, or defaults to environment variable model
         :param kwargs: Any kwargs to pass to the embedding call
@@ -144,16 +196,86 @@ class LiteLLMHandler:
         litellm sdk returns a generic openai exception
         """
 
-        # LiteLLM doesn't support any way to pre-validate an embedding model
+        # Tracker auto-detects region so we need to keep an eye on this being accurate
+        tracker = EmissionsTracker(
+            project_name=settings.project_name,
+            measure_power_secs=1,
+            save_to_file=False,
+            logging_logger=None,
+        )
+
+        start_time = time.perf_counter()
+        tracker.start()
+
         try:
+            # LiteLLM doesn't support any way to pre-validate an embedding model
             response = litellm.embedding(model=model or self.embedding_model, input=text, **kwargs)
         except BadRequestError as e:
+            tracker.stop()
             self.logger.exception("Failed to get embedding")
             raise MiscellaneousLiteLLMError(str(e), 400) from e
         except OpenAIError as e:
+            tracker.stop()
             self.logger.exception("Failed to get embedding")
             raise MiscellaneousLiteLLMError(str(e), 500) from e
         else:
+            emissions = tracker.stop()
+            end_time = time.perf_counter()
+
+            carbon_info = {
+                "emissions_kg_co2": emissions,
+                "duration_seconds": end_time - start_time,
+                "energy_consumed_kwh": getattr(tracker, "_total_energy", None),
+                "cpu_energy_kwh": getattr(tracker, "_cpu_energy", None),
+                "gpu_energy_kwh": getattr(tracker, "_gpu_energy", None),
+                "ram_energy_kwh": getattr(tracker, "_ram_energy", None),
+                "cpu_power_watts": getattr(tracker, "_last_measured_cpu_power", None),
+                "gpu_power_watts": getattr(tracker, "_last_measured_gpu_power", None),
+                "ram_power_watts": getattr(tracker, "_last_measured_ram_power", None),
+                "carbon_intensity_g_per_kwh": getattr(tracker, "_carbon_intensity", None),
+                "country_name": getattr(tracker, "_country_name", None),
+                "region": getattr(tracker, "_region", None),
+                "model_used": model or self.embedding_model,
+                "text_length": len(text),
+                "text_token_estimate": len(text.split()),
+            }
+
+            self.logger.info(
+                "Carbon cost for embedding call: "
+                "Emissions CO2 kg: {emissions_kg_co2}. "
+                "Duration seconds: {duration_seconds}. "
+                "Electricity total kWh: {energy_consumed}. "
+                "CPU energy kwh: {cpu_energy_kwh}. "
+                "GPU energy kwh: {gpu_energy_kwh}. "
+                "RAM energy kwh: {ram_energy_kwh}. "
+                "CPU power watts: {cpu_power_watts}. "
+                "GPU power watts: {gpu_power_watts}. "
+                "RAM power watts: {ram_power_watts}. "
+                "Carbon intensity g/kwh: {carbon_intensity_g_per_kwh}. "
+                "Country name: {country_name}. "
+                "Region: {region}. "
+                "Model used: {model_used}. "
+                "Text length: {text_length}. "
+                "Token estimate: {text_token_estimate}. "
+                "Actual token usage: {actual_token_usage}.",
+                emissions_kg_co2=carbon_info["emissions_kg_co2"],
+                duration_seconds=carbon_info["duration_seconds"],
+                energy_consumed=carbon_info["energy_consumed_kwh"],
+                cpu_energy_kwh=carbon_info["cpu_energy_kwh"],
+                gpu_energy_kwh=carbon_info["gpu_energy_kwh"],
+                ram_energy_kwh=carbon_info["ram_energy_kwh"],
+                cpu_power_watts=carbon_info["cpu_power_watts"],
+                gpu_power_watts=carbon_info["gpu_power_watts"],
+                ram_power_watts=carbon_info["ram_power_watts"],
+                carbon_intensity_g_per_kwh=carbon_info["carbon_intensity_g_per_kwh"],
+                country_name=carbon_info["country_name"],
+                region=carbon_info["region"],
+                model_used=carbon_info["model_used"],
+                text_length=carbon_info["text_length"],
+                text_token_estimate=carbon_info["text_token_estimate"],
+                actual_token_usage=response.usage.total_tokens,
+            )
+
             return response
 
     @staticmethod

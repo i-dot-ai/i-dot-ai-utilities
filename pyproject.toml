@@ -34,7 +34,7 @@ dependencies = [
     "minio>=7.2.15",
     "requests>=2.32.3",
     "structlog>=25.4.0",
-    "ecologits[litellm]>=0.7.3",
+    "codecarbon>=3.0.4",
 ]
 
 [project.urls]
