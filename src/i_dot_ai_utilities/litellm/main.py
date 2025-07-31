@@ -60,6 +60,44 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
+    def __log_carbon_info(self, message: str, carbon_info: dict[str, Any]):
+        self.logger.info(
+            "{message}"
+            "Emissions CO2 kg: {emissions_kg_co2}. "
+            "Duration seconds: {duration_seconds}. "
+            "Electricity total kWh: {energy_consumed}. "
+            "CPU energy kwh: {cpu_energy_kwh}. "
+            "GPU energy kwh: {gpu_energy_kwh}. "
+            "RAM energy kwh: {ram_energy_kwh}. "
+            "CPU power watts: {cpu_power_watts}. "
+            "GPU power watts: {gpu_power_watts}. "
+            "RAM power watts: {ram_power_watts}. "
+            "Carbon intensity g/kwh: {carbon_intensity_g_per_kwh}. "
+            "Country name: {country_name}. "
+            "Region: {region}. "
+            "Model used: {model_used}. "
+            "Text length: {text_length}. "
+            "Token estimate: {text_token_estimate}. "
+            "Actual token usage: {actual_token_usage}.",
+            message=message,
+            emissions_kg_co2=carbon_info["emissions_kg_co2"],
+            duration_seconds=carbon_info["duration_seconds"],
+            energy_consumed=carbon_info["energy_consumed_kwh"].kWh,
+            cpu_energy_kwh=carbon_info["cpu_energy_kwh"],
+            gpu_energy_kwh=carbon_info["gpu_energy_kwh"],
+            ram_energy_kwh=carbon_info["ram_energy_kwh"],
+            cpu_power_watts=carbon_info["cpu_power_watts"],
+            gpu_power_watts=carbon_info["gpu_power_watts"],
+            ram_power_watts=carbon_info["ram_power_watts"],
+            carbon_intensity_g_per_kwh=carbon_info["carbon_intensity_g_per_kwh"],
+            country_name=carbon_info["country_name"],
+            region=carbon_info["region"],
+            model_used=carbon_info["model_used"],
+            text_length=carbon_info["text_length"],
+            text_token_estimate=carbon_info["text_token_estimate"],
+            actual_token_usage=carbon_info["actual_token_usage"],
+        )
+
     def chat_completion(
         self,
         messages: list[dict[str, str]],
@@ -140,43 +178,10 @@ class LiteLLMHandler:
             "model_used": model or self.chat_model,
             "text_length": sum(len(message["content"]) for message in messages) or 0,
             "text_token_estimate": None,  # Estimating chat is far more complex than embedding, so leave empty
+            "actual_token_usage": response.usage.total_tokens,
         }
 
-        self.logger.info(
-            "Carbon cost for embedding call: "
-            "Emissions CO2 kg: {emissions_kg_co2}. "
-            "Duration seconds: {duration_seconds}. "
-            "Electricity total kWh: {energy_consumed}. "
-            "CPU energy kwh: {cpu_energy_kwh}. "
-            "GPU energy kwh: {gpu_energy_kwh}. "
-            "RAM energy kwh: {ram_energy_kwh}. "
-            "CPU power watts: {cpu_power_watts}. "
-            "GPU power watts: {gpu_power_watts}. "
-            "RAM power watts: {ram_power_watts}. "
-            "Carbon intensity g/kwh: {carbon_intensity_g_per_kwh}. "
-            "Country name: {country_name}. "
-            "Region: {region}. "
-            "Model used: {model_used}. "
-            "Text length: {text_length}. "
-            "Token estimate: {text_token_estimate}. "
-            "Actual token usage: {actual_token_usage}.",
-            emissions_kg_co2=carbon_info["emissions_kg_co2"],
-            duration_seconds=carbon_info["duration_seconds"],
-            energy_consumed=carbon_info["energy_consumed_kwh"].kWh,
-            cpu_energy_kwh=carbon_info["cpu_energy_kwh"],
-            gpu_energy_kwh=carbon_info["gpu_energy_kwh"],
-            ram_energy_kwh=carbon_info["ram_energy_kwh"],
-            cpu_power_watts=carbon_info["cpu_power_watts"],
-            gpu_power_watts=carbon_info["gpu_power_watts"],
-            ram_power_watts=carbon_info["ram_power_watts"],
-            carbon_intensity_g_per_kwh=carbon_info["carbon_intensity_g_per_kwh"],
-            country_name=carbon_info["country_name"],
-            region=carbon_info["region"],
-            model_used=carbon_info["model_used"],
-            text_length=carbon_info["text_length"],
-            text_token_estimate=carbon_info["text_token_estimate"],
-            actual_token_usage=response.usage.total_tokens,
-        )
+        self.__log_carbon_info("Carbon cost for chat completion call: ", carbon_info)
 
         return response
 
@@ -235,43 +240,10 @@ class LiteLLMHandler:
                 "model_used": model or self.embedding_model,
                 "text_length": len(text),
                 "text_token_estimate": len(text.split()),
+                "actual_token_usage": response.usage.total_tokens,
             }
 
-            self.logger.info(
-                "Carbon cost for embedding call: "
-                "Emissions CO2 kg: {emissions_kg_co2}. "
-                "Duration seconds: {duration_seconds}. "
-                "Electricity total kWh: {energy_consumed}. "
-                "CPU energy kwh: {cpu_energy_kwh}. "
-                "GPU energy kwh: {gpu_energy_kwh}. "
-                "RAM energy kwh: {ram_energy_kwh}. "
-                "CPU power watts: {cpu_power_watts}. "
-                "GPU power watts: {gpu_power_watts}. "
-                "RAM power watts: {ram_power_watts}. "
-                "Carbon intensity g/kwh: {carbon_intensity_g_per_kwh}. "
-                "Country name: {country_name}. "
-                "Region: {region}. "
-                "Model used: {model_used}. "
-                "Text length: {text_length}. "
-                "Token estimate: {text_token_estimate}. "
-                "Actual token usage: {actual_token_usage}.",
-                emissions_kg_co2=carbon_info["emissions_kg_co2"],
-                duration_seconds=carbon_info["duration_seconds"],
-                energy_consumed=carbon_info["energy_consumed_kwh"],
-                cpu_energy_kwh=carbon_info["cpu_energy_kwh"],
-                gpu_energy_kwh=carbon_info["gpu_energy_kwh"],
-                ram_energy_kwh=carbon_info["ram_energy_kwh"],
-                cpu_power_watts=carbon_info["cpu_power_watts"],
-                gpu_power_watts=carbon_info["gpu_power_watts"],
-                ram_power_watts=carbon_info["ram_power_watts"],
-                carbon_intensity_g_per_kwh=carbon_info["carbon_intensity_g_per_kwh"],
-                country_name=carbon_info["country_name"],
-                region=carbon_info["region"],
-                model_used=carbon_info["model_used"],
-                text_length=carbon_info["text_length"],
-                text_token_estimate=carbon_info["text_token_estimate"],
-                actual_token_usage=response.usage.total_tokens,
-            )
+            self.__log_carbon_info("Carbon cost for embedding call: ", carbon_info)
 
             return response
 
