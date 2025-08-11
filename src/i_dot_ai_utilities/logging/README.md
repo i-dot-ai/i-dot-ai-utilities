@@ -22,13 +22,13 @@ This is enough to format your logs for consumption by downstream log subscribers
 A more productionised version might look something like this - this uses console-based logging when running locally, and structures logging into JSON/enriches context when running in ECS (Fargate).
 ```python
 environment = os.environ.get('ENVIRONMENT')
-    logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
-    logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
+logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
+logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
 
-    logger = StructuredLogger(level='info', options={
-        "execution_environment": logger_environment,
-        "log_format": logger_format,
-    })
+logger = StructuredLogger(level='info', options={
+    "execution_environment": logger_environment,
+    "log_format": logger_format,
+})
 ```
 
 <br>
