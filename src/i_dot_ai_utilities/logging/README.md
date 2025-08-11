@@ -22,13 +22,13 @@ This is enough to format your logs for consumption by downstream log subscribers
 A more productionised version might look something like this - this uses console-based logging when running locally, and structures logging into JSON/enriches context when running in ECS (Fargate).
 ```python
 environment = os.environ.get('ENVIRONMENT')
-    logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
-    logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
+logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
+logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
 
-    logger = StructuredLogger(level='info', options={
-        "execution_environment": logger_environment,
-        "log_format": logger_format,
-    })
+logger = StructuredLogger(level='info', options={
+    "execution_environment": logger_environment,
+    "log_format": logger_format,
+})
 ```
 
 <br>
@@ -123,7 +123,7 @@ The above example would extract information from the FastAPI request object (que
 You can add custom fields to your logger, which will appear on each log message going forward until `refresh_context()` is called again. This is useful for enriching your own context onto log messages once important information has been discovered during execution.
 ```python
 @app.post("/login")
-    async def login(request: Request):
+async def login(request: Request):
     logger.refresh_context()
 
     user_email = get_user_info(request)
