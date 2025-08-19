@@ -11,6 +11,7 @@ test:
 	export LITELLM_MASTER_KEY=sk-1234567890abcdef && \
 	export IAI_LITELLM_CHAT_MODEL=azure/o4-mini && \
 	export IAI_LITELLM_EMBEDDING_MODEL=text-embedding-3-small && \
+	export IAI_LITELLM_PROJECT_NAME=utilities-tests && \
 	docker compose up -d --wait && \
 	PACKAGE_DIRS="logging,metrics,file_store,litellm"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
