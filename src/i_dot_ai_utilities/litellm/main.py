@@ -64,11 +64,13 @@ class LiteLLMHandler:
     def _log_impacts(self, impacts):
         """Helper method to log impact data from ecologits response chunk."""
         self.logger.info(
-            "Carbon cost for completion call: Electricity total {electricity_unit}: "
+            "Carbon cost for completion call in project {project_name}. "
+            "Electricity total {electricity_unit}: "
             "{electricity_value_min} to {electricity_value_max}. "
             "Global warming potential {gwp_unit}: {gwp_value_min} to {gwp_value_max}. "
             "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
             "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
+            project_name=settings.project_name,
             electricity_unit=impacts.energy.unit,
             electricity_value_min=impacts.energy.value.min,
             electricity_value_max=impacts.energy.value.max,
