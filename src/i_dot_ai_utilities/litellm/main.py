@@ -1,10 +1,10 @@
+from collections.abc import Generator
 from typing import Any
 
 import litellm
 import requests
 from ecologits import EcoLogits
 from litellm import BadRequestError, check_valid_key
-from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.llms.openai.common_utils import OpenAIError
 from litellm.types.utils import EmbeddingResponse, ModelResponse
 from requests import RequestException
@@ -61,15 +61,36 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
+    def _log_impacts(self, impacts):
+        """Helper method to log impact data from ecologits response chunk."""
+        self.logger.info(
+            "Carbon cost for completion call: Electricity total {electricity_unit}: "
+            "{electricity_value_min} to {electricity_value_max}. "
+            "Global warming potential {gwp_unit}: {gwp_value_min} to {gwp_value_max}. "
+            "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
+            "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
+            electricity_unit=impacts.energy.unit,
+            electricity_value_min=impacts.energy.value.min,
+            electricity_value_max=impacts.energy.value.max,
+            gwp_unit=impacts.gwp.unit,
+            gwp_value_min=impacts.gwp.value.min,
+            gwp_value_max=impacts.gwp.value.max,
+            adpe_unit=impacts.adpe.unit,
+            adpe_value_min=impacts.adpe.value.min,
+            adpe_value_max=impacts.adpe.value.max,
+            pe_unit=impacts.pe.unit,
+            pe_value_min=impacts.pe.value.min,
+            pe_value_max=impacts.pe.value.max,
+        )
+
     def chat_completion(
         self,
         messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        should_stream: bool = False,
         **kwargs: dict[str, Any],
-    ) -> ModelResponse | CustomStreamWrapper:
+    ) -> ModelResponse:
         """
         A function that calls chat completion within LiteLLM
         :param messages: The messages to send to the LLM
@@ -78,8 +99,7 @@ class LiteLLMHandler:
         :param max_tokens: The maximum number of tokens to use
         :param should_stream: Whether to stream the response, defaults to `False`
         :param kwargs: The keyword arguments to pass to the LiteLLM API
-        :return: The response from the chat as either a ModelResponse or CustomStreamWrapper,
-        depending on whether `should_stream` is used
+        :return: The response from the chat as ModelResponse
         :raises ModelNotAvailableException: occurs when the given or default model is not available on the given key
         :raises MiscellaneousLiteLLMException: occurs when the called method in the
         litellm sdk returns a generic openai exception
@@ -95,31 +115,11 @@ class LiteLLMHandler:
                 messages=messages,
                 temperature=temperature or settings.temperature,
                 max_tokens=max_tokens or settings.max_tokens,
-                stream=should_stream,
-                stream_options={"include_usage": True} if should_stream else None,
                 **kwargs,
             )
 
             if response.impacts:
-                self.logger.info(
-                    "Carbon cost for completion call: Electricity total {electricity_unit}: "
-                    "{electricity_value_min} to {electricity_value_max}. "
-                    "Global warming potential {gwp_unit}: {gwp_value_min} to {gwp_value_max}. "
-                    "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
-                    "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
-                    electricity_unit=response.impacts.energy.unit,
-                    electricity_value_min=response.impacts.energy.value.min,
-                    electricity_value_max=response.impacts.energy.value.max,
-                    gwp_unit=response.impacts.gwp.unit,
-                    gwp_value_min=response.impacts.gwp.value.min,
-                    gwp_value_max=response.impacts.gwp.value.max,
-                    adpe_unit=response.impacts.adpe.unit,
-                    adpe_value_min=response.impacts.adpe.value.min,
-                    adpe_value_max=response.impacts.adpe.value.max,
-                    pe_unit=response.impacts.pe.unit,
-                    pe_value_min=response.impacts.pe.value.min,
-                    pe_value_max=response.impacts.pe.value.max,
-                )
+                self._log_impacts(response.impacts)
             self.logger.info(
                 "Chat completion called for model {model}, with {number_of_messages} messages",
                 model=model or self.chat_model,
@@ -133,6 +133,64 @@ class LiteLLMHandler:
             raise MiscellaneousLiteLLMError(str(e), 500) from e
 
         return response
+
+    def chat_completion_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: dict[str, Any],
+    ) -> Generator:
+        """
+        A function that calls chat completion within LiteLLM and streams the response
+        :param messages: The messages to send to the LLM
+        :param model: The model name
+        :param temperature: The temperature to use
+        :param max_tokens: The maximum number of tokens to use
+        :param should_stream: Whether to stream the response, defaults to `False`
+        :param kwargs: The keyword arguments to pass to the LiteLLM API
+        :return: The response from the chat as Generator
+        :raises ModelNotAvailableException: occurs when the given or default model is not available on the given key
+        :raises MiscellaneousLiteLLMException: occurs when the called method in the
+        litellm sdk returns a generic openai exception
+        """
+        try:
+            if model and not _check_chat_model_is_callable(model, self.logger):
+                raise ModelNotAvailableError("The given model is not available on this api key", 401)
+            if not model and not _check_chat_model_is_callable(self.chat_model, self.logger):
+                raise ModelNotAvailableError("The default model is not available on this api key", 401)
+
+            stream = litellm.completion(
+                model=model or self.chat_model,
+                messages=messages,
+                temperature=temperature or settings.temperature,
+                max_tokens=max_tokens or settings.max_tokens,
+                stream=True,
+                stream_options={"include_usage": True},
+                **kwargs,
+            )
+
+            chunks = []
+            for chunk in stream:
+                chunks.append(chunk)
+                yield chunk
+
+            if chunks:
+                # Only the final chunk contains the impacts object
+                final_chunk = chunks[-1]
+                if hasattr(final_chunk, "impacts") and final_chunk.impacts:
+                    self._log_impacts(final_chunk.impacts)
+
+            self.logger.info(
+                "Chat completion stream called for model {model}, with {number_of_messages} messages",
+                model=model or self.chat_model,
+                number_of_messages=len(messages),
+            )
+
+        except (BadRequestError, OpenAIError) as e:
+            self.logger.exception("Failed to get chat completion stream")
+            raise MiscellaneousLiteLLMError(str(e), 400 if isinstance(e, BadRequestError) else 500) from e
 
     def get_embedding(self, text: str, model: str | None = None, **kwargs: dict[str, Any]) -> EmbeddingResponse:
         """
