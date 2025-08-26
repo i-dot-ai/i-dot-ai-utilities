@@ -36,6 +36,7 @@ dependencies = [
     "structlog>=25.4.0",
     "ecologits>=0.8.2",
     "rapidfuzz>=3.13.0",
+    "langfuse>=3.3.1",
 ]
 
 [project.urls]
