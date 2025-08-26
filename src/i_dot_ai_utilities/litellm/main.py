@@ -62,7 +62,7 @@ class LiteLLMHandler:
             self.logger.exception("Failed to connect to API")
 
     def _log_impacts(self, impacts):
-        """Helper method to log impact data from ecologits response chunk."""
+        """Helper method to log impact data from ecologits response"""
         self.logger.info(
             "Carbon cost for completion call in project {project_name}. "
             "Electricity total {electricity_unit}: "
@@ -99,7 +99,6 @@ class LiteLLMHandler:
         :param model: The model name
         :param temperature: The temperature to use
         :param max_tokens: The maximum number of tokens to use
-        :param should_stream: Whether to stream the response, defaults to `False`
         :param kwargs: The keyword arguments to pass to the LiteLLM API
         :return: The response from the chat as ModelResponse
         :raises ModelNotAvailableException: occurs when the given or default model is not available on the given key
@@ -150,7 +149,6 @@ class LiteLLMHandler:
         :param model: The model name
         :param temperature: The temperature to use
         :param max_tokens: The maximum number of tokens to use
-        :param should_stream: Whether to stream the response, defaults to `False`
         :param kwargs: The keyword arguments to pass to the LiteLLM API
         :return: The response from the chat as Generator
         :raises ModelNotAvailableException: occurs when the given or default model is not available on the given key
