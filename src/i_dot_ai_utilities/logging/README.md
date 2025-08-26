@@ -22,13 +22,13 @@ This is enough to format your logs for consumption by downstream log subscribers
 A more productionised version might look something like this - this uses console-based logging when running locally, and structures logging into JSON/enriches context when running in ECS (Fargate).
 ```python
 environment = os.environ.get('ENVIRONMENT')
-    logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
-    logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
+logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
+logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
 
-    logger = StructuredLogger(level='info', options={
-        "execution_environment": logger_environment,
-        "log_format": logger_format,
-    })
+logger = StructuredLogger(level='info', options={
+    "execution_environment": logger_environment,
+    "log_format": logger_format,
+})
 ```
 
 <br>
@@ -66,9 +66,9 @@ It is best practice to NOT to use f-strings in log message creation. Variable in
 Exceptions are added to the message output automatically when called inside of an `except` block:
 ```python
 logger.exception("Something went wrong when user {email} logging in", email=email)
-
-// This will log the message, and inject the exception into the log context automatically
 ```
+
+This will log the message, and inject the exception into the log context automatically.
 
 <br>
 
@@ -95,6 +95,26 @@ async def do_the_thing(request: Request):
 
 <br>
 
+### Setting Execution Environment Type and Log Format
+
+#### Environment Type
+
+Environment Type is configurable using the `execution_environment` option setting when instantiating the logger. Accepted values are defined in the `ExecutionEnvironmentType` enum (see [here](./types/enrichment_types.py)).
+
+The logger will automatically extract important information from the execution environment and enrich log messages using it. 
+
+#### Log Format
+
+Log format is configurable using the `log_format` option setting when instantiating the logger. Accepted values are defined in the `LogOutputFormat` enum (see [here](./types/log_output_format.py)).
+
+The ability to change log formats exists to give developers a friendlier log output when developing locally. They should be set to JSON format when running on the platform so structured logs can be read and processed in our logging stack downstream.
+
+<br>
+
+***
+
+<br>
+
 ### Implementing Persistent Context
 Context can be automatically be added to log messages by using enrichers. Enrichers are helpers provided to you to automatically extract context related to a given execution:
 ```python
@@ -112,6 +132,15 @@ async def root(request: Request):
 ```
 The above example would extract information from the FastAPI request object (query string, path, user agent, etc) and inject it into all subsequent log messages until `refresh_context()` is called again.
 
+Each Context Enricher object accepts a `type` and `object`. `type` is a `ContextEnrichmentType` enum ([see here](./types/enrichment_types.py) for accepted values). `object` is the Input Object to pass into the logger for context extraction - see the table below for further details.
+
+The following context enrichers are available for use:
+| Name | Input Object | Extracted Fields |
+|---------|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| FastAPI / Starlette | [Request Object](httpsd:'\[]:?PO-//fastapi.tiangolo.com/advanced/using-request-directly/#details-about-the-request-object) | See [FastApiRequestMetadata](./types/fastapi_enrichment_schema.py#31) |
+| Lambda  | [Lambda Context Object](https://docs.aws.amazon.com/lambda/latest/dg/python-context.html) | See [LambdaContextMetadata](./types/lambda_enrichment_schema.py) |
+
+
 <br>
 
 ***
@@ -123,7 +152,7 @@ The above example would extract information from the FastAPI request object (que
 You can add custom fields to your logger, which will appear on each log message going forward until `refresh_context()` is called again. This is useful for enriching your own context onto log messages once important information has been discovered during execution.
 ```python
 @app.post("/login")
-    async def login(request: Request):
+async def login(request: Request):
     logger.refresh_context()
 
     user_email = get_user_info(request)

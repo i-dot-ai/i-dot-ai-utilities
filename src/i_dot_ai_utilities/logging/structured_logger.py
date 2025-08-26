@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import uuid
@@ -22,9 +23,8 @@ from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigO
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
-    from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import (
-        ExtractedFastApiContext,
-    )
+    from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import ExtractedFastApiContext
+    from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import ExtractedLambdaContext
 
 
 class StructuredLogger:
@@ -88,8 +88,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.debug(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.debug(message, message_template=message_template, **safe_kwargs)
 
     def info(self, message_template: str, **kwargs: Any) -> None:
         """Write an informational log message.
@@ -105,8 +106,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.info(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.info(message, message_template=message_template, **safe_kwargs)
 
     def warning(self, message_template: str, **kwargs: Any) -> None:
         """Write a warning log message.
@@ -124,8 +126,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.warning(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.warning(message, message_template=message_template, **safe_kwargs)
 
     def error(self, message_template: str, **kwargs: Any) -> None:
         """Write an error log message.
@@ -141,8 +144,9 @@ class StructuredLogger:
         :param message_template: The string literal or formatted string to pass to the logger.
         :param **kwargs: Arguments passed to interpolate into a formatted string, if using.
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.error(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.error(message, message_template=message_template, **safe_kwargs)
 
     def exception(self, message_template: str, **kwargs: Any) -> None:
         """Write a caught exception, along with an error log message. Caught exceptions will automatically be added as context to the log message.
@@ -155,8 +159,9 @@ class StructuredLogger:
 
         logger.exception('User {email} failed to update in DB', email='me@example.com') # Log output: {"message": User me@example.com failed to update in DB", "email": "me@example.com", "exception": "Traceback ..."}
         """  # noqa: E501
-        message = self._get_interpolated_message(message_template, **kwargs)
-        self._logger.exception(message, message_template=message_template, **kwargs)
+        safe_kwargs = self._normalise_kwargs(**kwargs)
+        message = self._get_interpolated_message(message_template, **safe_kwargs)
+        self._logger.exception(message, message_template=message_template, **safe_kwargs)
 
     def set_context_field(self, field_key: str, field_value: ContextFieldValue) -> None:
         """Add a custom field to the logger dictionary. This field will appear on subsequent log messages.
@@ -168,7 +173,8 @@ class StructuredLogger:
         :param field_key: The key of the field.
         :param field_value: The value of the field.
         """
-        structlog.contextvars.bind_contextvars(**{field_key: field_value})
+        safe_kwargs = self._normalise_kwargs(**{field_key: field_value})
+        structlog.contextvars.bind_contextvars(**safe_kwargs)
 
     def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
@@ -181,7 +187,7 @@ class StructuredLogger:
         if context_enrichers is None:
             return
 
-        additional_context: ExtractedFastApiContext | dict[str, Any] = {}
+        additional_context: ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any] = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]
@@ -204,6 +210,19 @@ class StructuredLogger:
             return False
 
         return selected_option
+
+    def _normalise_kwargs(self, **kwargs: Any) -> dict[str, str]:
+        try:
+            return {
+                k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict | list)) else v for k, v in kwargs.items()
+            }
+        except Exception:
+            msg = (
+                "Exception(Logger): Failed to normalise kwargs. "
+                "Ensure the data input to the logger is valid. Inputs dropped."
+            )
+            self._logger.exception(msg, message_template=msg)
+            return {}
 
     def _get_interpolated_message(self, message_template: str, **kwargs: Any) -> str:
         try:
