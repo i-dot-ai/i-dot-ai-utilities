@@ -1,4 +1,3 @@
-# In logger_config_options.py
 from typing import TypedDict
 try:
     from typing import NotRequired
