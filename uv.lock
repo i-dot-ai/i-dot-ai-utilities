@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10, <4.0"
 
 [[package]]
@@ -350,6 +350,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "requests" },
     { name = "structlog" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -373,7 +374,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", specifier = ">=1.38.35" },
+    { name = "boto3", specifier = ">=1.38.23,<2.0.0" },
     { name = "minio", specifier = ">=7.2.15" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
@@ -383,6 +384,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.2" },
     { name = "structlog", specifier = ">=25.4.0" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
 provides-extras = ["dev"]
 

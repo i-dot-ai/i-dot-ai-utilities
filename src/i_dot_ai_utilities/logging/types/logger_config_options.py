@@ -1,4 +1,10 @@
-from typing import NotRequired, TypedDict
+# In logger_config_options.py
+from typing import TypedDict
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
+
 
 from i_dot_ai_utilities.logging.enrichers.enrichment_provider import (
     ExecutionEnvironmentType,
