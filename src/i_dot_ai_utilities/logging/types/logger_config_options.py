@@ -1,4 +1,5 @@
 from typing import TypedDict
+
 try:
     from typing import NotRequired
 except ImportError:
