@@ -561,6 +561,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "requests" },
     { name = "structlog" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -597,6 +598,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.2" },
     { name = "structlog", specifier = ">=25.4.0" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
 provides-extras = ["dev"]
 
