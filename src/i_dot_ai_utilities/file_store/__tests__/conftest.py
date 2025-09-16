@@ -7,6 +7,7 @@ from botocore.exceptions import ClientError
 
 from i_dot_ai_utilities.file_store.main import FileStore
 from i_dot_ai_utilities.file_store.settings import Settings
+from i_dot_ai_utilities.file_store.types.file_store_destination_enum import FileStoreDestinationEnum
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
@@ -28,13 +29,13 @@ def define_logger() -> StructuredLogger:
 
 
 @pytest.fixture
-def file_store() -> FileStore:
-    return FileStore(define_logger())
+def s3_file_store() -> FileStore:
+    return FileStore.create(FileStoreDestinationEnum.AWS_S3, define_logger())
 
 
 @pytest.fixture
-def client() -> boto3.client:
-    return settings.boto3_client()
+def boto3_client(s3_file_store: FileStore) -> boto3.client:
+    return s3_file_store.get_client()
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ def bucket(client: boto3.client) -> Generator[Any, Any, None]:
 
 @pytest.fixture
 def file(file_store: FileStore) -> Generator[Any, Any, None]:
-    response = file_store.create_object("test_file.txt", "file_content", metadata={"metadata": "metadata"})
+    response = file_store.put_object("test_file.txt", "file_content", metadata={"metadata": "metadata"})
     assert response
     yield
     response = file_store.delete_object("test_file.txt")

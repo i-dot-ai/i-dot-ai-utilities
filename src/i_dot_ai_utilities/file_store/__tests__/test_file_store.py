@@ -5,9 +5,9 @@ import pytest
 from i_dot_ai_utilities.file_store.main import FileStore
 
 
-@pytest.mark.usefixtures("client", "bucket")
+@pytest.mark.usefixtures("boto3_client", "bucket")
 def test_create_file(file_store: FileStore) -> None:
-    response = file_store.create_object("test_file.txt", "file_content", metadata={"metadata": "metadata"})
+    response = file_store.put_object("test_file.txt", "file_content", metadata={"metadata": "metadata"})
     assert response
 
 
@@ -72,7 +72,7 @@ def test_update_object(file_store: FileStore) -> None:
 
 @pytest.mark.usefixtures("client", "bucket", "file")
 def test_get_pre_signed_url(file_store: FileStore) -> None:
-    response: str | None = file_store.get_pre_signed_url("test_file.txt")
+    response: str | None = file_store.download_object_url("test_file.txt")
     assert response
     assert response.startswith("http://localhost:9000/test-bucket/app_data/test_file.txt?X-Amz-Algorithm")
 
@@ -92,13 +92,13 @@ def test_file_doesnt_exist(file_store: FileStore) -> None:
 
 @pytest.mark.usefixtures("client", "bucket")
 def test_get_none_pre_signed_url(file_store: FileStore) -> None:
-    response = file_store.get_pre_signed_url("test_file6.txt")
+    response = file_store.download_object_url("test_file6.txt")
     assert response is None
 
 
 @pytest.mark.usefixtures("client", "bucket")
 def test_get_empty_json_object(file_store: FileStore) -> None:
-    create_response = file_store.create_object("test_file.txt", "")
+    create_response = file_store.put_object("test_file.txt", "")
     assert create_response
 
     download_response: dict[Any, Any] | list[Any] | None = file_store.download_json("test_file.txt")
