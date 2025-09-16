@@ -5,6 +5,7 @@ import boto3
 import pytest
 from botocore.exceptions import ClientError
 
+from i_dot_ai_utilities.file_store.factory import create_file_store
 from i_dot_ai_utilities.file_store.main import FileStore
 from i_dot_ai_utilities.file_store.settings import Settings
 from i_dot_ai_utilities.file_store.types.file_store_destination_enum import FileStoreDestinationEnum
@@ -30,7 +31,7 @@ def define_logger() -> StructuredLogger:
 
 @pytest.fixture
 def s3_file_store() -> FileStore:
-    return FileStore.create(FileStoreDestinationEnum.AWS_S3, define_logger())
+    return create_file_store(FileStoreDestinationEnum.AWS_S3, define_logger())
 
 
 @pytest.fixture
