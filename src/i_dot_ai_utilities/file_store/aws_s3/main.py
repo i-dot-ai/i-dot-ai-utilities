@@ -1,9 +1,13 @@
 import json
-from typing import Any, BinaryIO, Unpack
+from typing import TYPE_CHECKING, Any, BinaryIO, Unpack
+
+if TYPE_CHECKING:
+    from types_boto3_s3.type_defs import CopySourceTypeDef
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from types_boto3_s3 import S3Client
 
 from i_dot_ai_utilities.file_store.main import FileStore
 from i_dot_ai_utilities.file_store.settings import Settings
@@ -16,24 +20,33 @@ class S3FileStore(FileStore):
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
     """
 
-    def __init_boto3_client(self, **kwargs: Unpack[S3ClientKwargs]) -> boto3.client:
+    def __init_boto3_client(self, **kwargs: Unpack[S3ClientKwargs]) -> S3Client:
         """
         This function returns the client connection to S3 or minio using boto3,
         depending on the environment variable `ENVIRONMENT`
         :return: Boto3 client with an S3 session to either minio or AWS s3
         """
         if self.settings.environment.lower() in ["local", "test"]:
-            return boto3.client(
+            # Filter out any conflicting kwargs that we're setting explicitly
+            filtered_kwargs = {
+                k: v
+                for k, v in kwargs.items()
+                if k not in ["endpoint_url", "aws_access_key_id", "aws_secret_access_key", "config"]
+            }
+
+            return boto3.client(  # type: ignore[misc]
                 "s3",
                 endpoint_url=self.settings.minio_address,
                 aws_access_key_id=self.settings.aws_access_key_id,
                 aws_secret_access_key=self.settings.aws_secret_access_key,  # pragma: allowlist secret
                 config=Config(signature_version="s3v4"),
-                **kwargs,
+                **filtered_kwargs,  # type: ignore[arg-type]
             )
         else:
+            # Filter out profile_name which isn't valid for session.client
+            client_kwargs = {k: v for k, v in kwargs.items() if k != "profile_name"}
             session = boto3.Session(self.settings.aws_region)
-            return session.client("s3")
+            return session.client("s3", **client_kwargs)  # type: ignore[misc, arg-type]
 
     def __init__(self, logger: StructuredLogger, settings: Settings, **kwargs: Unpack[S3ClientKwargs]) -> None:
         """
@@ -42,7 +55,7 @@ class S3FileStore(FileStore):
         """
         self.logger = logger
         self.settings = settings
-        self.client: boto3.client = self.__init_boto3_client(**kwargs)
+        self.client: S3Client = self.__init_boto3_client(**kwargs)
 
     def __prefix_key(self, key: str) -> str:
         """
@@ -52,7 +65,7 @@ class S3FileStore(FileStore):
         """
         return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
 
-    def get_client(self) -> boto3.client:
+    def get_client(self) -> S3Client:
         return self.client
 
     def put_object(
@@ -77,15 +90,16 @@ class S3FileStore(FileStore):
         bucket = self.settings.bucket_name
         key = self.__prefix_key(key)
         try:
-            put_args = {"Bucket": bucket, "Key": key, "Body": data}
+            # Use explicit arguments instead of **kwargs to satisfy mypy
+            if metadata and content_type:
+                self.client.put_object(Bucket=bucket, Key=key, Body=data, Metadata=metadata, ContentType=content_type)
+            elif metadata:
+                self.client.put_object(Bucket=bucket, Key=key, Body=data, Metadata=metadata)
+            elif content_type:
+                self.client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+            else:
+                self.client.put_object(Bucket=bucket, Key=key, Body=data)
 
-            if metadata:
-                put_args["Metadata"] = metadata  # type: ignore[assignment]
-
-            if content_type:
-                put_args["ContentType"] = content_type
-
-            self.client.put_object(**put_args)
             self.logger.info("Successfully uploaded object: {key} to bucket: {bucket}", key=key, bucket=bucket)
         except ClientError:
             self.logger.exception("Failed to upload object {key}", key=key)
@@ -231,17 +245,17 @@ class S3FileStore(FileStore):
             for obj in response.get("Contents", []):
                 objects.append(
                     {
-                        "key": obj["Key"],
-                        "size": obj["Size"],
+                        "key": str(obj["Key"]),
+                        "size": int(obj["Size"]),
                         "last_modified": obj["LastModified"].isoformat(),
-                        "etag": obj["ETag"].strip('"'),
+                        "etag": str(obj["ETag"]).strip('"'),
                     }
                 )
         except ClientError:
             self.logger.exception("Failed to list objects with prefix {prefix}", prefix=prefix)
             return []
         else:
-            return objects
+            return objects  # type: ignore[return-value]
 
     def get_object_metadata(
         self,
@@ -294,7 +308,7 @@ class S3FileStore(FileStore):
         source_key = self.__prefix_key(source_key)
         dest_key = self.__prefix_key(dest_key)
         try:
-            copy_source = {"Bucket": bucket, "Key": source_key}
+            copy_source: CopySourceTypeDef = {"Bucket": bucket, "Key": source_key}
             self.client.copy_object(CopySource=copy_source, Bucket=bucket, Key=dest_key)
         except ClientError:
             self.logger.exception(
