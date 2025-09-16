@@ -8,21 +8,36 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
     command: server --console-address ":9001" /data
     networks:
       - utilities-net
     volumes:
-      - minio_data:/var/lib/minio/data:Z
+      - minio_data:/data
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "mc", "ready", "local" ]
-      retries: 20
-      start_period: 60s
-      start_interval: 1s
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 10s
+
+  gcs-emulator:
+    image: fullstorydev/gcsemulator:latest
+    ports:
+      - "9023:9000"
+    volumes:
+      - gcs_emulator_data:/data
+    networks:
+      - utilities-net
+    environment:
+      - PORT=9000
+    command: ["-host", "0.0.0.0", "-port", "9000", "-dir", "/data"]
+    restart: unless-stopped
 
 networks:
-    utilities-net:
+  utilities-net:
 volumes:
-    minio_data:
+  minio_data:
+  gcs_emulator_data:
