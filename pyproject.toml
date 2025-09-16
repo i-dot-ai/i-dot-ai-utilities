@@ -142,6 +142,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
+    "types-boto3-custom",
 ]
 
 [tool.hatch.build]
@@ -157,3 +158,6 @@ packages = ["src/i_dot_ai_utilities"]
 filterwarnings = [
     "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
 ]
+
+[tool.uv.sources]
+types-boto3-custom = { path = "vendored/types_boto3_custom-1.40.31-py3-none-any.whl" }

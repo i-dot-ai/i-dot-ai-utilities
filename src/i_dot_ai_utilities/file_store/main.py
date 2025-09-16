@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
 from typing import Any, BinaryIO
 
-import boto3
 from azure.storage.blob import BlobServiceClient
 from google.cloud.storage import Client
+from types_boto3_s3 import S3Client as BotoS3Client
 
 
 class FileStore(ABC):
     @abstractmethod
-    def get_client(self) -> boto3.client | BlobServiceClient | Client:
+    def get_client(self) -> BotoS3Client | BlobServiceClient | Client:
         pass
 
     @abstractmethod
