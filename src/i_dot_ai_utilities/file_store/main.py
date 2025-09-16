@@ -4,7 +4,7 @@ from typing import Any, BinaryIO
 
 import boto3
 from azure.storage.blob import BlobServiceClient
-from google.cloud import storage
+from google.cloud.storage import Client
 
 from i_dot_ai_utilities.file_store.aws_s3.main import S3FileStore
 from i_dot_ai_utilities.file_store.azure_blob_storage.main import AzureFileStore
@@ -17,7 +17,7 @@ from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 class FileStore(ABC):
@@ -41,7 +41,7 @@ class FileStore(ABC):
         return filestore
 
     @abstractmethod
-    def get_client(self) -> boto3.client | BlobServiceClient | storage.Client:
+    def get_client(self) -> boto3.client | BlobServiceClient | Client:
         pass
 
     @abstractmethod

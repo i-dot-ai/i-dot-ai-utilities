@@ -21,11 +21,21 @@ class AzureFileStore(FileStore):
         This function returns the client connection to Azure Blob Storage
         :return: Azure Blob Storage client
         """
+        if not self.settings.azure_account_url:
+            message = "Azure account URL is required but not configured"
+            raise ValueError(message)
+
         if self.settings.environment.lower() in ["local", "test"]:
+            if not self.settings.azure_connection_string:
+                message = "Azure connection string is required for local/test environments"
+                raise ValueError(message)
             return BlobServiceClient(
                 account_url=self.settings.azure_account_url, credential=self.settings.azure_connection_string, **kwargs
             )
         else:
+            if not self.settings.azure_account_key:
+                message = "Azure account key is required for production environments"
+                raise ValueError(message)
             return BlobServiceClient(
                 account_url=self.settings.azure_account_url, credential=self.settings.azure_account_key, **kwargs
             )
@@ -208,7 +218,7 @@ class AzureFileStore(FileStore):
             blob_client = self.container_client.get_blob_client(self.__prefix_key(key))
 
             sas_token = generate_blob_sas(
-                account_name=blob_client.account_name,
+                account_name=blob_client.account_name,  # type: ignore[arg-type]
                 container_name=blob_client.container_name,
                 blob_name=blob_client.blob_name,
                 account_key=self.settings.azure_account_key,
@@ -239,7 +249,7 @@ class AzureFileStore(FileStore):
             for blob in blob_list:
                 objects.append(
                     {
-                        "key": blob.name,
+                        "key": str(blob.name),
                         "size": blob.size or 0,
                         "last_modified": blob.last_modified.isoformat() if blob.last_modified else "",
                         "etag": blob.etag.strip('"') if blob.etag else "",
@@ -249,7 +259,7 @@ class AzureFileStore(FileStore):
             self.logger.exception("Failed to list objects with prefix {prefix}", prefix=prefix)
             return []
         else:
-            return objects
+            return objects  # type: ignore[return-value]
 
     def get_object_metadata(
         self,

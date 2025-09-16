@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     """
 
-    environment: str = Field(validation_alias="ENVIRONMENT")
+    environment: str = Field(alias="ENVIRONMENT")
     bucket_name: str = Field()
     aws_region: str = Field()
     minio_address: str = Field(default="http://localhost:9000")
@@ -40,4 +40,4 @@ class Settings(BaseSettings):
     azure_account_key: str | None = Field(default=None)
     data_dir: str = Field(default="app_data")
 
-    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_")
+    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_", case_sensitive=False)

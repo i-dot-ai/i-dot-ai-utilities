@@ -2,8 +2,8 @@ import json
 from datetime import timedelta
 from typing import Any, BinaryIO
 
-from google.cloud import storage
 from google.cloud.exceptions import GoogleCloudError, NotFound
+from google.cloud.storage import Client
 from typing_extensions import Unpack
 
 from i_dot_ai_utilities.file_store.main import FileStore
@@ -17,15 +17,15 @@ class GCPFileStore(FileStore):
     File storage class providing CRUD operations for GCP Cloud Storage objects
     """
 
-    def __init_gcp_client(self, **kwargs: Unpack[GCPClientKwargs]) -> storage.Client:
+    def __init_gcp_client(self, **kwargs: Unpack[GCPClientKwargs]) -> Client:
         """
         This function returns the client connection to GCP Cloud Storage
         :return: GCP Cloud Storage client
         """
         if self.settings.environment.lower() in ["local", "test"]:
-            return storage.Client(**kwargs)
+            return Client(**kwargs)
         else:
-            return storage.Client(**kwargs, api_key=self.settings.gcp_api_key)
+            return Client(**kwargs, api_key=self.settings.gcp_api_key)
 
     def __init__(self, logger: StructuredLogger, settings: Settings, **kwargs: Unpack[GCPClientKwargs]) -> None:
         """
@@ -34,7 +34,7 @@ class GCPFileStore(FileStore):
         """
         self.logger = logger
         self.settings = settings
-        self.client: storage.Client = self.__init_gcp_client(**kwargs)
+        self.client: Client = self.__init_gcp_client(**kwargs)
         self.bucket = self.client.bucket(self.settings.bucket_name)
 
     def __prefix_key(self, key: str) -> str:
@@ -45,7 +45,7 @@ class GCPFileStore(FileStore):
         """
         return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
 
-    def get_client(self) -> storage.Client:
+    def get_client(self) -> Client:
         return self.client
 
     def put_object(
