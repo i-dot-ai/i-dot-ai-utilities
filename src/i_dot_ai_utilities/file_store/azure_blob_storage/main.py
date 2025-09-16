@@ -16,7 +16,7 @@ class AzureFileStore(FileStore):
     File storage class providing CRUD operations for Azure Blob Storage objects
     """
 
-    def init_azure_client(self, **kwargs: Unpack[AzureClientKwargs]) -> BlobServiceClient:
+    def __init_azure_client(self, **kwargs: Unpack[AzureClientKwargs]) -> BlobServiceClient:
         """
         This function returns the client connection to Azure Blob Storage
         :return: Azure Blob Storage client
@@ -37,7 +37,7 @@ class AzureFileStore(FileStore):
         """
         self.logger = logger
         self.settings = settings
-        self.client: BlobServiceClient = self.init_azure_client(**kwargs)
+        self.client: BlobServiceClient = self.__init_azure_client(**kwargs)
         self.container_client = self.client.get_container_client(self.settings.bucket_name)
 
     def __prefix_key(self, key: str) -> str:
@@ -47,6 +47,9 @@ class AzureFileStore(FileStore):
         :return: The key with a prefix if it's set
         """
         return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
+
+    def get_client(self) -> BlobServiceClient:
+        return self.client
 
     def put_object(
         self,

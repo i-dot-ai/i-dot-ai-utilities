@@ -16,7 +16,7 @@ class S3FileStore(FileStore):
     File storage class providing CRUD operations for S3 bucket objects in AWS S3 and minio
     """
 
-    def init_boto3_client(self, **kwargs: Unpack[S3ClientKwargs]) -> boto3.client:
+    def __init_boto3_client(self, **kwargs: Unpack[S3ClientKwargs]) -> boto3.client:
         """
         This function returns the client connection to S3 or minio using boto3,
         depending on the environment variable `ENVIRONMENT`
@@ -42,7 +42,7 @@ class S3FileStore(FileStore):
         """
         self.logger = logger
         self.settings = settings
-        self.client: boto3.client = self.init_boto3_client(**kwargs)
+        self.client: boto3.client = self.__init_boto3_client(**kwargs)
 
     def __prefix_key(self, key: str) -> str:
         """
@@ -51,6 +51,9 @@ class S3FileStore(FileStore):
         :return: The key with a prefix if it's set
         """
         return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
+
+    def get_client(self) -> boto3.client:
+        return self.client
 
     def put_object(
         self,

@@ -2,11 +2,15 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Any, BinaryIO
 
+import boto3
+from azure.storage.blob import BlobServiceClient
+from google.cloud import storage
+
 from i_dot_ai_utilities.file_store.aws_s3.main import S3FileStore
 from i_dot_ai_utilities.file_store.azure_blob_storage.main import AzureFileStore
-from i_dot_ai_utilities.file_store.enums.file_store_destination import FileStoreDestinationEnum
 from i_dot_ai_utilities.file_store.gcp_cloud_storage.main import GCPFileStore
 from i_dot_ai_utilities.file_store.settings import Settings
+from i_dot_ai_utilities.file_store.types.file_store_destination_enum import FileStoreDestinationEnum
 from i_dot_ai_utilities.file_store.types.kwargs_dicts import AzureClientKwargs, GCPClientKwargs, S3ClientKwargs
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
@@ -31,10 +35,14 @@ class FileStore(ABC):
         }
 
         if destination not in stores:
-            raise ValueError("Unsupported destination: " + destination.value)
+            raise ValueError("Unsupported destination: " + destination.name)
         settings = get_settings()
         filestore: S3FileStore | GCPFileStore | AzureFileStore = stores[destination](logger, settings, **kwargs)
         return filestore
+
+    @abstractmethod
+    def get_client(self) -> boto3.client | BlobServiceClient | storage.Client:
+        pass
 
     @abstractmethod
     def read_object(self, key: str, as_text: bool = False, encoding: str = "utf-8") -> bytes | str | None:

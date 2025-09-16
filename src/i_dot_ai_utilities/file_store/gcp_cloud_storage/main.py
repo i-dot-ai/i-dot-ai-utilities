@@ -17,7 +17,7 @@ class GCPFileStore(FileStore):
     File storage class providing CRUD operations for GCP Cloud Storage objects
     """
 
-    def init_gcp_client(self, **kwargs: Unpack[GCPClientKwargs]) -> storage.Client:
+    def __init_gcp_client(self, **kwargs: Unpack[GCPClientKwargs]) -> storage.Client:
         """
         This function returns the client connection to GCP Cloud Storage
         :return: GCP Cloud Storage client
@@ -34,7 +34,7 @@ class GCPFileStore(FileStore):
         """
         self.logger = logger
         self.settings = settings
-        self.client: storage.Client = self.init_gcp_client(**kwargs)
+        self.client: storage.Client = self.__init_gcp_client(**kwargs)
         self.bucket = self.client.bucket(self.settings.bucket_name)
 
     def __prefix_key(self, key: str) -> str:
@@ -44,6 +44,9 @@ class GCPFileStore(FileStore):
         :return: The key with a prefix if it's set
         """
         return key if not self.settings.data_dir else f"{self.settings.data_dir}/{key}"
+
+    def get_client(self) -> storage.Client:
+        return self.client
 
     def put_object(
         self,
