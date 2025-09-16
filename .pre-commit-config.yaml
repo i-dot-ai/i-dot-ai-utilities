@@ -60,7 +60,6 @@ repos:
     - id: mypy
       args: ["--ignore-missing-imports"]
       language: system
-#      additional_dependencies: [ "types-PyYAML", "pydantic" ]
       exclude: .*migrations
   - repo: https://github.com/kynan/nbstripout
     rev: 0.8.1
