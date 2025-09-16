@@ -30,14 +30,14 @@ class Settings(BaseSettings):
 
     environment: str = Field(alias="ENVIRONMENT")
     bucket_name: str = Field()
-    aws_region: str = Field()
-    minio_address: str = Field(default="http://localhost:9000")
+    aws_region: str | None = Field()
+    data_dir: str = Field(default="app_data")
+    minio_address: str | None = Field(default=None)
     aws_access_key_id: str | None = Field(default=None)
     aws_secret_access_key: str | None = Field(default=None)
     gcp_api_key: str | None = Field(default=None)
     azure_account_url: str | None = Field(default=None)
     azure_connection_string: str | None = Field(default=None)
     azure_account_key: str | None = Field(default=None)
-    data_dir: str = Field(default="app_data")
 
     model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_", case_sensitive=False)

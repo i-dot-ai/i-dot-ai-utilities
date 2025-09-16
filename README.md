@@ -24,10 +24,8 @@ You can find information on usage of the metrics collection library in the [metr
 ### Future features:
 
 - keycloak authentication
-- s3
 - langfuse and litellm
-- logging/observability
-- opensearch
+- vector stores
 
 ## Settings
 
