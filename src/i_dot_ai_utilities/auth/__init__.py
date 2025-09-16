@@ -1,1 +1,1 @@
-__all__ = ["AuthApiClient", "UserAuthorisationResult", "AuthApiRequestError"]
+__all__ = ["AuthApiClient", "AuthApiRequestError", "UserAuthorisationResult"]

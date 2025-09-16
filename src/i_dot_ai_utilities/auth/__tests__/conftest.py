@@ -21,7 +21,7 @@ def get_mock_requests_response(authed: bool, is_errored=False):
 
     mock_response = Mock()
 
-    mock_response.ok = False if is_errored else True
+    mock_response.ok = not is_errored
 
     mock_response.json.return_value = payload
 

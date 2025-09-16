@@ -1,6 +1,7 @@
-from pydantic import BaseModel
 import requests
+from pydantic import BaseModel
 
+from i_dot_ai_utilities.auth.exceptions import AuthApiRequestError
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
 
@@ -28,11 +29,13 @@ class AuthApiClient:
     _app_name: str
     _auth_api_url: str
     _logger: StructuredLogger
+    _timeout: int
 
-    def __init__(self, app_name: str, auth_api_url: str, logger: StructuredLogger):
+    def __init__(self, app_name: str, auth_api_url: str, logger: StructuredLogger, timeout: int = 3):
         self._app_name = app_name
         self._auth_api_url = auth_api_url
         self._logger = logger
+        self._timeout = timeout
 
     def get_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
         try:
@@ -42,7 +45,7 @@ class AuthApiClient:
 
             self._logger.debug("Calling auth api at {url}", url=self._auth_api_url)
 
-            response = requests.post(self._auth_api_url, json=payload)
+            response = requests.post(self._auth_api_url, json=payload, timeout=self._timeout)
 
             if not response.ok:
                 response.raise_for_status()

@@ -1,13 +1,12 @@
 # mypy: disable-error-code="no-untyped-def"
 
-import json
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+
 import pytest
 import requests
 
 from i_dot_ai_utilities.auth.__tests__.conftest import get_mock_requests_response
 from i_dot_ai_utilities.auth.auth_api import AuthApiClient, AuthApiRequestError
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
 
 @pytest.mark.parametrize(
@@ -27,8 +26,6 @@ def test_auth_api_response_extracts_expected_fields(mock_requests_response, is_a
     client = AuthApiClient("test_app", "https://test-url.test", logger)
 
     response = client.get_user_authorisation_info("test_token")
-
-    print(response)
 
     assert response.email == "mocked@test.com"
     assert response.is_authorised == is_authorised
