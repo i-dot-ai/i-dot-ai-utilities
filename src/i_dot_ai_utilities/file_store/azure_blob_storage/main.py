@@ -17,24 +17,14 @@ class AzureFileStore(FileStore):
     """
 
     def __init_azure_client(self, **kwargs: Unpack[AzureClientKwargs]) -> BlobServiceClient:
-        """
-        This function returns the client connection to Azure Blob Storage
-        :return: Azure Blob Storage client
-        """
-        if not self.settings.azure_account_url:
-            message = "Azure account URL is required but not configured"
-            raise ValueError(message)
-
         if self.settings.environment.lower() in ["local", "test"]:
             if not self.settings.azure_connection_string:
                 message = "Azure connection string is required for local/test environments"
                 raise ValueError(message)
-            return BlobServiceClient(
-                account_url=self.settings.azure_account_url, credential=self.settings.azure_connection_string, **kwargs
-            )
+            return BlobServiceClient.from_connection_string(self.settings.azure_connection_string, **kwargs)
         else:
-            if not self.settings.azure_account_key:
-                message = "Azure account key is required for production environments"
+            if not self.settings.azure_account_key or not self.settings.azure_account_url:
+                message = "Azure account key and URL are required for production environments"
                 raise ValueError(message)
             return BlobServiceClient(
                 account_url=self.settings.azure_account_url, credential=self.settings.azure_account_key, **kwargs
@@ -217,14 +207,34 @@ class AzureFileStore(FileStore):
 
             blob_client = self.container_client.get_blob_client(self.__prefix_key(key))
 
-            sas_token = generate_blob_sas(
-                account_name=blob_client.account_name,  # type: ignore[arg-type]
-                container_name=blob_client.container_name,
-                blob_name=blob_client.blob_name,
-                account_key=self.settings.azure_account_key,
-                permission=BlobSasPermissions(read=True),
-                expiry=datetime.now(timezone.utc) + timedelta(seconds=expiration),
-            )
+            # For local/test environment with Azurite, use the fixed account key
+            if self.settings.environment.lower() in ["local", "test"]:
+                # Azurite uses a fixed account key
+                azurite_account_key = (
+                    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT5"  # pragma: allowlist secret
+                    "0uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="  # pragma: allowlist secret
+                )
+                sas_token = generate_blob_sas(
+                    account_name="devstoreaccount1",
+                    container_name=blob_client.container_name,
+                    blob_name=blob_client.blob_name,
+                    account_key=azurite_account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=datetime.now(timezone.utc) + timedelta(seconds=expiration),
+                )
+            else:
+                if not self.settings.azure_account_key:
+                    self.logger.warning("Azure account key required for generating signed URLs in production")
+                    return None
+
+                sas_token = generate_blob_sas(
+                    account_name=blob_client.account_name,  # type: ignore[arg-type]
+                    container_name=blob_client.container_name,
+                    blob_name=blob_client.blob_name,
+                    account_key=self.settings.azure_account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=datetime.now(timezone.utc) + timedelta(seconds=expiration),
+                )
         except AzureError:
             self.logger.exception("Error generating signed URL for {key}", key=self.__prefix_key(key))
             return None

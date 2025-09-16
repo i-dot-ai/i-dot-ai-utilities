@@ -4,7 +4,9 @@ export
 test:
 	export IAI_FS_BUCKET_NAME=test-bucket && \
 	export STORAGE_EMULATOR_HOST=http://localhost:9023 && \
-	docker compose up -d --wait minio gcs-emulator && \
+	export IAI_FS_AZURE_ACCOUNT_URL=http://localhost:10000/devstoreaccount1 && \
+	export IAI_FS_AZURE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;" && \  # pragma: allowlist secret
+	docker compose up -d --wait minio gcs-emulator azurite && \
 	PACKAGE_DIRS="logging,metrics,file_store"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
@@ -14,7 +16,7 @@ test:
 		--cov-report term-missing \
 		--cov-fail-under 75 || exit 1; \
 	done; \
-	docker compose down minio gcs-emulator
+	docker compose down minio gcs-emulator azurite
 
 lint:
 	uv run ruff format
