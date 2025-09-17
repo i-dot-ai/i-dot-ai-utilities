@@ -37,10 +37,26 @@ dependencies = [
     "ecologits>=0.8.2",
     "rapidfuzz>=3.13.0",
     "langfuse>=3.3.1",
+    "typing_extensions>=4.0.0",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/i-dot-ai/i-dot-ai-utilities"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "ruff>=0.12.2",
+    "mypy>=1.15.0",
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 
 [tool.ruff]
 line-length = 120
