@@ -5,6 +5,9 @@ env:
   ENVIRONMENT: test
   IAI_FS_BUCKET_NAME: test-bucket
   IAI_FS_AWS_REGION: eu-west-2
+  IAI_FS_MINIO_ADDRESS: http://localhost:9000
+  IAI_FS_AWS_ACCESS_KEY_ID: minioadmin
+  IAI_FS_AWS_SECRET_ACCESS_KEY: minioadmin
 
 on:
   push:

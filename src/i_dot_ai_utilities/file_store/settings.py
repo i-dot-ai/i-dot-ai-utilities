@@ -1,5 +1,3 @@
-import boto3
-from botocore.config import Config
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,35 +19,25 @@ class Settings(BaseSettings):
     only needs setting if not using the default minio credentials)
     - **IAI_FS_AWS_SECRET_ACCESS_KEY**: The AWS secret key (for localhost,
     only needs setting if not using the default minio credentials)
+    - **IAI_FS_GCP_API_KEY**: The API key to use for GCP access
+    - **IAI_FS_AZURE_ACCOUNT_URL**: The Azure account URL
+    - **IAI_FS_AZURE_CONNECTION_STRING**: The Azure connection string
+    - **IAI_FS_AZURE_ACCOUNT_KEY**: The Azure account key
     - **IAI_DATA_DIR**: The data directory to use inside the set S3 bucket
     (defaults to `app_data`)
 
     """
 
-    environment: str = Field(validation_alias="ENVIRONMENT")
+    environment: str = Field(alias="ENVIRONMENT")
     bucket_name: str = Field()
-    aws_region: str = Field()
-    minio_address: str = Field(default="http://localhost:9000")
-    aws_access_key_id: str = Field(default="minioadmin")
-    aws_secret_access_key: str = Field(default="minioadmin")
+    aws_region: str | None = Field()
     data_dir: str = Field(default="app_data")
+    minio_address: str | None = Field(default=None)
+    aws_access_key_id: str | None = Field(default=None)
+    aws_secret_access_key: str | None = Field(default=None)
+    gcp_api_key: str | None = Field(default=None)
+    azure_account_url: str | None = Field(default=None)
+    azure_connection_string: str | None = Field(default=None)
+    azure_account_key: str | None = Field(default=None)
 
-    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_")
-
-    def boto3_client(self) -> boto3.client:
-        """
-        This function returns the client connection to S3 or minio using boto3,
-        depending on the environment variable `ENVIRONMENT`
-        :return: Boto3 client with an S3 session to either minio or AWS s3
-        """
-        if self.environment.lower() in ["local", "test"]:
-            return boto3.client(
-                "s3",
-                endpoint_url=self.minio_address,
-                aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key,  # pragma: allowlist secret
-                config=Config(signature_version="s3v4"),
-            )
-        else:
-            session = boto3.Session(self.aws_region)
-            return session.client("s3")
+    model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_FS_", case_sensitive=False)
