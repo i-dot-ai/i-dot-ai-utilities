@@ -4,7 +4,8 @@
 
 ### Create a FileStore object
 
-You can create a `FileStore` object very easily by instantiating an instance of the `FileStore` abstract class using the `create` function:
+You can create a `FileStore` object very easily by instantiating an instance of the `FileStore` abstract class using the `create_file_store` function.
+The factory function `create_file_store` has been implemented to deal with circular dependency within the module.
 ```python
 from i_dot_ai_utilities.file_store.factory import create_file_store
 from i_dot_ai_utilities.file_store.types.file_store_destination_enum import FileStoreDestinationEnum
