@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Generator
 from typing import Any
 
@@ -155,42 +156,46 @@ class LiteLLMHandler:
         :raises MiscellaneousLiteLLMException: occurs when the called method in the
         litellm sdk returns a generic openai exception
         """
-        try:
-            if model and not _check_chat_model_is_callable(model, self.logger):
-                raise ModelNotAvailableError("The given model is not available on this api key", 401)
-            if not model and not _check_chat_model_is_callable(self.chat_model, self.logger):
-                raise ModelNotAvailableError("The default model is not available on this api key", 401)
 
-            stream = litellm.completion(
-                model=model or self.chat_model,
-                messages=messages,
-                temperature=temperature or settings.temperature,
-                max_tokens=max_tokens or settings.max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-                **kwargs,
-            )
+        # Warning are suppressed because they bubble up from litellm jankiness
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*model_fields.*deprecated.*", category=DeprecationWarning)
+            try:
+                if model and not _check_chat_model_is_callable(model, self.logger):
+                    raise ModelNotAvailableError("The given model is not available on this api key", 401)
+                if not model and not _check_chat_model_is_callable(self.chat_model, self.logger):
+                    raise ModelNotAvailableError("The default model is not available on this api key", 401)
 
-            chunks = []
-            for chunk in stream:
-                chunks.append(chunk)
-                yield chunk
+                stream = litellm.completion(
+                    model=model or self.chat_model,
+                    messages=messages,
+                    temperature=temperature or settings.temperature,
+                    max_tokens=max_tokens or settings.max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **kwargs,
+                )
 
-            if chunks:
-                # Only the final chunk contains the impacts object
-                final_chunk = chunks[-1]
-                if hasattr(final_chunk, "impacts") and final_chunk.impacts:
-                    self._log_impacts(final_chunk.impacts)
+                chunks = []
+                for chunk in stream:
+                    chunks.append(chunk)
+                    yield chunk
 
-            self.logger.info(
-                "Chat completion stream called for model {model}, with {number_of_messages} messages",
-                model=model or self.chat_model,
-                number_of_messages=len(messages),
-            )
+                if chunks:
+                    # Only the final chunk contains the impacts object
+                    final_chunk = chunks[-1]
+                    if final_chunk.get("impacts", None):
+                        self._log_impacts(final_chunk.impacts)
 
-        except (BadRequestError, OpenAIError) as e:
-            self.logger.exception("Failed to get chat completion stream")
-            raise MiscellaneousLiteLLMError(str(e), 400 if isinstance(e, BadRequestError) else 500) from e
+                self.logger.info(
+                    "Chat completion stream called for model {model}, with {number_of_messages} messages",
+                    model=model or self.chat_model,
+                    number_of_messages=len(messages),
+                )
+
+            except (BadRequestError, OpenAIError, AttributeError) as e:
+                self.logger.exception("Failed to get chat completion stream")
+                raise MiscellaneousLiteLLMError(str(e), 400 if isinstance(e, BadRequestError) else 500) from e
 
     def get_embedding(self, text: str, model: str | None = None, **kwargs: dict[str, Any]) -> EmbeddingResponse:
         """

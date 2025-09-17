@@ -27,16 +27,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic>=2.11.7",
+    "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
     "boto3>=1.38.23,<2.0.0",
-    "litellm>=1.74.0.post1",
+    "litellm>=1.77.1",
     "minio>=7.2.15",
     "requests>=2.32.3",
     "structlog>=25.4.0",
     "ecologits>=0.8.2",
-    "rapidfuzz>=3.13.0",
-    "langfuse>=3.3.1",
+    "rapidfuzz>=3.14.1",
+    "langfuse>=3.4.0",
     "typing_extensions>=4.0.0",
 ]
 
