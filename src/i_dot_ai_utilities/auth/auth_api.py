@@ -40,6 +40,7 @@ class AuthApiClient:
     def get_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
         try:
             payload = {
+                "app_name": self._app_name,
                 "token": token,
             }
 
