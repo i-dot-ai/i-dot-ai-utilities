@@ -1,1 +1,1 @@
-__all__: list[str] = ["file_store", "logging"]
+__all__: list[str] = ["auth", "file_store", "logging", "metrics"]
