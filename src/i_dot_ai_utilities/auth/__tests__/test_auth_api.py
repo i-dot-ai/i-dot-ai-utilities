@@ -34,7 +34,6 @@ def test_auth_api_response_extracts_expected_fields(mock_requests_response, is_a
     payload = called_kwargs.get("json")
 
     assert isinstance(payload, dict)
-    assert "token" in payload
     assert payload["app_name"] == test_app
     assert payload["token"] == test_token
 
