@@ -39,14 +39,16 @@ class AuthApiClient:
 
     def get_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
         try:
+            endpoint = self._auth_api_url + "/tokens/authorise"
+
+            self._logger.debug("Calling auth api at {url}", url=endpoint)
+
             payload = {
                 "app_name": self._app_name,
                 "token": token,
             }
 
-            self._logger.debug("Calling auth api at {url}", url=self._auth_api_url)
-
-            response = requests.post(self._auth_api_url, json=payload, timeout=self._timeout)
+            response = requests.post(endpoint, json=payload, timeout=self._timeout)
 
             if not response.ok:
                 response.raise_for_status()

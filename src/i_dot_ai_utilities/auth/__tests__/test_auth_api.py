@@ -10,6 +10,7 @@ from i_dot_ai_utilities.auth.auth_api import AuthApiClient, AuthApiRequestError
 
 test_app = "test_app"
 test_token = "test_token"  # noqa: S105
+test_url = "https://test-url.test"
 
 
 @pytest.mark.parametrize(
@@ -26,12 +27,14 @@ test_token = "test_token"  # noqa: S105
 def test_auth_api_response_extracts_expected_fields(mock_requests_response, is_authorised, logger):
     mock_requests_response.return_value = get_mock_requests_response(authed=is_authorised)
 
-    client = AuthApiClient(test_app, "https://test-url.test", logger)
+    client = AuthApiClient(test_app, test_url, logger)
 
     response = client.get_user_authorisation_info(test_token)
 
-    _, called_kwargs = mock_requests_response.call_args
+    called_args, called_kwargs = mock_requests_response.call_args
     payload = called_kwargs.get("json")
+
+    assert called_args[0] == test_url + "/tokens/authorise"
 
     assert isinstance(payload, dict)
     assert payload["app_name"] == test_app
@@ -48,7 +51,7 @@ def test_auth_api_response_extracts_expected_fields(mock_requests_response, is_a
 def test_auth_api_handles_non_ok_response_as_expected(mock_requests_response, logger):
     mock_requests_response.return_value = get_mock_requests_response(authed=True, is_errored=True)
 
-    client = AuthApiClient(test_app, "https://test-url.test", logger)
+    client = AuthApiClient(test_app, test_url, logger)
 
     with pytest.raises(AuthApiRequestError):
         client.get_user_authorisation_info(test_token)
