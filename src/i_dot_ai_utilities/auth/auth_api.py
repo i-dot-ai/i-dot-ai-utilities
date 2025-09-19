@@ -17,12 +17,13 @@ class AuthApiResponseDecision(BaseModel):
 
 class AuthApiResponse(BaseModel):
     metadata: AuthApiResponseMetadata
-    decision: AuthApiResponseDecision
+    decision: AuthApiResponseDecision 
 
 
 class UserAuthorisationResult(BaseModel):
     email: str
     is_authorised: bool
+    auth_reason: str
 
 
 class AuthApiClient:
@@ -64,7 +65,11 @@ class AuthApiClient:
                 auth_reason=model.decision.auth_reason,
             )
 
-            return UserAuthorisationResult(email=model.metadata.user_email, is_authorised=model.decision.is_authorised)
+            return UserAuthorisationResult(
+                email=model.metadata.user_email, 
+                is_authorised=model.decision.is_authorised,
+                auth_reason=model.decision.auth_reason,
+            )
         except Exception as e:
             self._logger.exception("Auth API request failed")
             raise AuthApiRequestError from e
