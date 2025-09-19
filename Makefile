@@ -4,7 +4,7 @@ export
 test:
 	export IAI_FS_BUCKET_NAME=test-bucket && \
 	docker compose up -d --wait minio && \
-	PACKAGE_DIRS="logging,metrics,file_store"; \
+	PACKAGE_DIRS="logging,metrics,file_store,auth"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
