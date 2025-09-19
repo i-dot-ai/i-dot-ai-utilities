@@ -17,7 +17,7 @@ class AuthApiResponseDecision(BaseModel):
 
 class AuthApiResponse(BaseModel):
     metadata: AuthApiResponseMetadata
-    decision: AuthApiResponseDecision 
+    decision: AuthApiResponseDecision
 
 
 class UserAuthorisationResult(BaseModel):
@@ -66,7 +66,7 @@ class AuthApiClient:
             )
 
             return UserAuthorisationResult(
-                email=model.metadata.user_email, 
+                email=model.metadata.user_email,
                 is_authorised=model.decision.is_authorised,
                 auth_reason=model.decision.auth_reason,
             )
