@@ -7,7 +7,7 @@ test:
 	export IAI_FS_AZURE_ACCOUNT_URL=http://localhost:10000/devstoreaccount1 && \
 	export IAI_FS_AZURE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;" && \
 	docker compose up -d --wait minio gcs-emulator azurite && \
-	PACKAGE_DIRS="logging,metrics,file_store"; \
+	PACKAGE_DIRS="logging,metrics,file_store,auth"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
