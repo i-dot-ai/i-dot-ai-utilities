@@ -1,0 +1,2 @@
+class AuthApiRequestError(Exception):
+    pass

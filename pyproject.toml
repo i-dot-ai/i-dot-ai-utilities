@@ -138,7 +138,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
-    "types-requests>=2.32.4.20250611",
+    "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
 ]

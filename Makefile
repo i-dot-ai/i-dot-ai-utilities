@@ -13,7 +13,7 @@ test:
 	export IAI_LITELLM_EMBEDDING_MODEL=text-embedding-3-small && \
 	export IAI_LITELLM_PROJECT_NAME=utilities-tests && \
 	docker compose up -d --wait && \
-	PACKAGE_DIRS="logging,metrics,file_store,litellm"; \
+	PACKAGE_DIRS="logging,metrics,file_store,litellm,auth"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
@@ -27,4 +27,5 @@ test:
 lint:
 	uv run ruff format --check
 	uv run ruff check
+	uv run mypy src/i_dot_ai_utilities/ --ignore-missing-imports
 	uv run bandit -ll -r src/i_dot_ai_utilities
