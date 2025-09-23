@@ -1,10 +1,13 @@
 import warnings
 from collections.abc import Generator
-from typing import Any
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 import litellm
 import requests
 from ecologits import EcoLogits
+from ecologits.tracers.utils import ImpactsOutput
+from ecologits.utils.range_value import RangeValue
 from litellm import BadRequestError, check_valid_key
 from litellm.llms.openai.common_utils import OpenAIError
 from litellm.types.utils import EmbeddingResponse, ModelResponse
@@ -14,15 +17,35 @@ from i_dot_ai_utilities.litellm.exceptions import MiscellaneousLiteLLMError, Mod
 from i_dot_ai_utilities.litellm.settings import Settings
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
-settings = Settings()
+if TYPE_CHECKING:
+    from ecologits.tracers.litellm_tracer import ChatCompletion
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
+
+
+settings = get_settings()
 
 
 def _check_chat_model_is_callable(model: str, logger: StructuredLogger | None = None) -> bool:
+    if not litellm.api_key:
+        return False
+
     result = check_valid_key(model, litellm.api_key)
     if not result and logger:
-        logger.error("Model {model} is not available on key {api_key}", model=model, api_key=litellm.api_key[:6])
+        logger.error(
+            "Model {model} is not available on key {api_key}",
+            model=model,
+            api_key=litellm.api_key[:6] if litellm.api_key else "",
+        )
     elif result and logger:
-        logger.debug("Model {model} available on key {api_key}", model=model, api_key=litellm.api_key[:6])
+        logger.debug(
+            "Model {model} available on key {api_key}",
+            model=model,
+            api_key=litellm.api_key[:6] if litellm.api_key else "",
+        )
     return result  # type: ignore[no-any-return]
 
 
@@ -37,18 +60,20 @@ class LiteLLMHandler:
         if settings.api_base:
             litellm.api_base = settings.api_base
         if settings.api_version:
-            litellm.api_version = settings.api_version
+            litellm.api_version = settings.api_version  # type: ignore[assignment]
         if settings.organisation:
-            litellm.organization = settings.organisation
+            litellm.organization = settings.organisation  # type: ignore[assignment]
         self.chat_model = settings.chat_model
         self.embedding_model = settings.embedding_model
         litellm.request_timeout = settings.timeout
 
-        response = _check_chat_model_is_callable(self.chat_model, self.logger)
-        if not response:
+        model_is_callable = _check_chat_model_is_callable(self.chat_model, self.logger)
+        if not model_is_callable:
             #  Slicing API key to not expose entire key in logs
             self.logger.error(
-                "Invalid API key {api_key} for model {model}", api_key=litellm.api_key[:6], model=self.chat_model
+                "Invalid API key {api_key} for model {model}",
+                api_key=litellm.api_key[:6] if litellm.api_key else "",
+                model=self.chat_model,
             )
         if settings.langfuse_public_key and settings.langfuse_secret_key:
             self.logger.info("Langfuse callback configured by environment variables")
@@ -62,8 +87,72 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
-    def _log_impacts(self, impacts):
+    def _log_impacts(self, impacts: ImpactsOutput) -> None:
         """Helper method to log impact data from ecologits response"""
+        electricity_unit = (impacts.energy.unit if impacts.energy else 0,)
+        gwp_unit = (impacts.gwp.unit if impacts.gwp else 0,)
+        adpe_unit = (impacts.adpe.unit if impacts.adpe else 0,)
+        pe_unit = (impacts.pe.unit if impacts.pe else 0,)
+
+        electricity_value_min = (
+            0
+            if not impacts.energy
+            else impacts.energy.value.min
+            if isinstance(impacts.energy.value, RangeValue)
+            else impacts.energy.value
+        )
+        electricity_value_max = (
+            0
+            if not impacts.energy
+            else impacts.energy.value.max
+            if isinstance(impacts.energy.value, RangeValue)
+            else impacts.energy.value
+        )
+
+        gwp_value_min = (
+            0
+            if not impacts.gwp
+            else impacts.gwp.value.min
+            if isinstance(impacts.gwp.value, RangeValue)
+            else impacts.gwp.value
+        )
+        gwp_value_max = (
+            0
+            if not impacts.gwp
+            else impacts.gwp.value.max
+            if isinstance(impacts.gwp.value, RangeValue)
+            else impacts.gwp.value
+        )
+
+        adpe_value_min = (
+            0
+            if not impacts.adpe
+            else impacts.adpe.value.min
+            if isinstance(impacts.adpe.value, RangeValue)
+            else impacts.adpe.value
+        )
+        adpe_value_max = (
+            0
+            if not impacts.adpe
+            else impacts.adpe.value.max
+            if isinstance(impacts.adpe.value, RangeValue)
+            else impacts.adpe.value
+        )
+
+        pe_value_min = (
+            0
+            if not impacts.pe
+            else impacts.pe.value.min
+            if isinstance(impacts.pe.value, RangeValue)
+            else impacts.pe.value
+        )
+        pe_value_max = (
+            0
+            if not impacts.pe
+            else impacts.pe.value.max
+            if isinstance(impacts.pe.value, RangeValue)
+            else impacts.pe.value
+        )
         self.logger.info(
             "Carbon cost for completion call in project {project_name}. "
             "Electricity total {electricity_unit}: "
@@ -72,18 +161,18 @@ class LiteLLMHandler:
             "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
             "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
             project_name=settings.project_name,
-            electricity_unit=impacts.energy.unit,
-            electricity_value_min=impacts.energy.value.min,
-            electricity_value_max=impacts.energy.value.max,
-            gwp_unit=impacts.gwp.unit,
-            gwp_value_min=impacts.gwp.value.min,
-            gwp_value_max=impacts.gwp.value.max,
-            adpe_unit=impacts.adpe.unit,
-            adpe_value_min=impacts.adpe.value.min,
-            adpe_value_max=impacts.adpe.value.max,
-            pe_unit=impacts.pe.unit,
-            pe_value_min=impacts.pe.value.min,
-            pe_value_max=impacts.pe.value.max,
+            electricity_unit=electricity_unit,
+            electricity_value_min=electricity_value_min,
+            electricity_value_max=electricity_value_max,
+            gwp_unit=gwp_unit,
+            gwp_value_min=gwp_value_min,
+            gwp_value_max=gwp_value_max,
+            adpe_unit=adpe_unit,
+            adpe_value_min=adpe_value_min,
+            adpe_value_max=adpe_value_max,
+            pe_unit=pe_unit,
+            pe_value_min=pe_value_min,
+            pe_value_max=pe_value_max,
         )
 
     def chat_completion(
@@ -112,7 +201,7 @@ class LiteLLMHandler:
             if not model and not _check_chat_model_is_callable(self.chat_model, self.logger):
                 raise ModelNotAvailableError("The default model is not available on this api key", 401)
 
-            response = litellm.completion(
+            response: ChatCompletion = litellm.completion(
                 model=model or self.chat_model,
                 messages=messages,
                 temperature=temperature or settings.temperature,
@@ -133,8 +222,8 @@ class LiteLLMHandler:
         except OpenAIError as e:
             self.logger.exception("Failed to get chat completion")
             raise MiscellaneousLiteLLMError(str(e), 500) from e
-
-        return response
+        else:
+            return response
 
     def chat_completion_stream(
         self,
@@ -210,7 +299,7 @@ class LiteLLMHandler:
         """
         try:
             # LiteLLM doesn't support any way to pre-validate an embedding model
-            response = litellm.embedding(model=model or self.embedding_model, input=text, **kwargs)
+            response: EmbeddingResponse = litellm.embedding(model=model or self.embedding_model, input=[text], **kwargs)  # type: ignore[call-overload]
         except BadRequestError as e:
             self.logger.exception("Failed to get embedding")
             raise MiscellaneousLiteLLMError(str(e), 400) from e

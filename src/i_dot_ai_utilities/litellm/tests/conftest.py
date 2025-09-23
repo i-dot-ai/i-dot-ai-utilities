@@ -20,5 +20,5 @@ def define_logger() -> StructuredLogger:
 
 
 @pytest.fixture
-def litellm_client():
+def litellm_client() -> LiteLLMHandler:
     return LiteLLMHandler(define_logger())
