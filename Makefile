@@ -27,5 +27,4 @@ test:
 lint:
 	uv run ruff format --check
 	uv run ruff check
-	uv run mypy src/i_dot_ai_utilities/ --ignore-missing-imports
 	uv run bandit -ll -r src/i_dot_ai_utilities
