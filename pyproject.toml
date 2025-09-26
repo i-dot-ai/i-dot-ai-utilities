@@ -38,6 +38,9 @@ dependencies = [
     "rapidfuzz>=3.14.1",
     "langfuse>=3.4.0",
     "typing_extensions>=4.0.0",
+    "google-cloud-storage>=3.3.1",
+    "azure-core>=1.35.1",
+    "azure-storage-blob>=12.26.0",
 ]
 
 [project.urls]
@@ -57,6 +60,12 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.ruff]
 line-length = 120
@@ -138,6 +147,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
+    "types-boto3-custom",
     "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
@@ -161,3 +171,6 @@ filterwarnings = [
     "ignore:.*Expected.*fields but got.*:UserWarning",
     "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
 ]
+
+[tool.uv.sources]
+types-boto3-custom = { path = "vendored/types_boto3_custom-1.40.31-py3-none-any.whl" }

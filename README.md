@@ -45,9 +45,7 @@ More information on usage and setup can be found in the [litellm library readme]
 
 - authentication
 - authorisation
-- s3 vector store
-- opensearch
-- ecologits for llm call carbon tracking
+- vector stores
 
 ## Settings
 

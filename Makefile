@@ -6,6 +6,9 @@ run_backing_services:
 
 test:
 	export IAI_FS_BUCKET_NAME=test-bucket && \
+	export STORAGE_EMULATOR_HOST=http://localhost:9023 && \
+	export IAI_FS_AZURE_ACCOUNT_URL=http://localhost:10000/devstoreaccount1 && \
+	export IAI_FS_AZURE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;" && \
 	export IAI_LITELLM_API_BASE=http://localhost:4000 && \
 	export IAI_LITELLM_API_KEY=sk-1234567890abcdef && \
 	export LITELLM_MASTER_KEY=sk-1234567890abcdef && \
@@ -25,6 +28,7 @@ test:
 	docker compose down
 
 lint:
-	uv run ruff format --check
-	uv run ruff check
+	uv run ruff format
+	uv run ruff check --fix
+	uv run mypy src/i_dot_ai_utilities/ --ignore-missing-imports
 	uv run bandit -ll -r src/i_dot_ai_utilities
