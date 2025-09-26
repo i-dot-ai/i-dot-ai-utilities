@@ -34,6 +34,9 @@ dependencies = [
     "requests>=2.32.3",
     "structlog>=25.4.0",
     "typing_extensions>=4.0.0",
+    "google-cloud-storage>=3.3.1",
+    "azure-core>=1.35.1",
+    "azure-storage-blob>=12.26.0",
 ]
 
 [project.urls]
@@ -53,6 +56,12 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.ruff]
 line-length = 120
@@ -133,6 +142,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
+    "types-boto3-custom",
     "types-requests>=2.32.4.20250913",
 ]
 
@@ -149,3 +159,6 @@ packages = ["src/i_dot_ai_utilities"]
 filterwarnings = [
     "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
 ]
+
+[tool.uv.sources]
+types-boto3-custom = { path = "vendored/types_boto3_custom-1.40.31-py3-none-any.whl" }
