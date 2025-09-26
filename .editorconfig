@@ -26,3 +26,6 @@ indent_style = tab
 [docker-compose.yaml]
 indent_size = 2
 indent_style = tab
+
+[*.yaml]
+indent_size = 2

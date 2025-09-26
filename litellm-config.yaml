@@ -1,0 +1,17 @@
+model_list:
+  - model_name: o4-mini
+    litellm_params:
+      model: azure/o4-mini
+      api_base: os.environ/AZURE_OPENAI_ENDPOINT
+      api_key: os.environ/AZURE_OPENAI_API_KEY  # pragma: allowlist secret
+      api_version: "2024-12-01-preview"
+
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: azure/text-embedding-3-small
+      api_key: os.environ/AZURE_OPENAI_API_KEY  # pragma: allowlist secret
+      api_base: os.environ/AZURE_OPENAI_ENDPOINT
+      api_version: "2024-02-01"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

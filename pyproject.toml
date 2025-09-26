@@ -27,12 +27,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic>=2.11.7",
+    "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
     "boto3>=1.38.23,<2.0.0",
+    "litellm>=1.77.1",
     "minio>=7.2.15",
     "requests>=2.32.3",
     "structlog>=25.4.0",
+    "ecologits>=0.8.2",
+    "rapidfuzz>=3.14.1",
+    "langfuse>=3.4.0",
     "typing_extensions>=4.0.0",
     "google-cloud-storage>=3.3.1",
     "azure-core>=1.35.1",
@@ -127,6 +131,7 @@ known-first-party = ["i-dot-ai-utilities"]
 "*/tests/*" = ["S101", "S106", "PLR0913", "PLR0915", "PLR2004", "TD003"]
 "*/tests_playwright/*" = ["S101", "S106", "PLR0913", "PLR2004", "TD003"]
 "src/i_dot_ai_utilities/logging/*" = ["TRY003"]
+"src/i_dot_ai_utilities/litellm/*" = ["EM101", "TRY003"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -144,6 +149,8 @@ dev = [
     "starlette>=0.47.0",
     "types-boto3-custom",
     "types-requests>=2.32.4.20250913",
+    "types-setuptools>=80.9.0.20250529",
+    "types-urllib3>=1.26.25.14",
 ]
 
 [tool.hatch.build]
@@ -157,7 +164,12 @@ packages = ["src/i_dot_ai_utilities"]
 
 [tool.pytest.ini_options]
 filterwarnings = [
-    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth"
+    "error",
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth",
+    "ignore::UserWarning:pydantic.*",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore:.*Expected.*fields but got.*:UserWarning",
+    "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
 ]
 
 [tool.uv.sources]
