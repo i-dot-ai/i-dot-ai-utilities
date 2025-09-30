@@ -383,3 +383,33 @@ class GCPFileStore(FileStore):
         except json.JSONDecodeError:
             self.logger.exception("Failed to parse JSON from {key}", key=key)
             return None
+
+    def list_buckets(self) -> list[dict]:
+        """
+        List available buckets
+
+        Returns:
+            A list of dicts containing the name and creation time for each bucket
+        """
+        try:
+            buckets = self.client.list_buckets()
+            return [{"Name": bucket.name, "CreationTime": bucket.time_created} for bucket in buckets]
+        except GoogleCloudError:
+            self.logger.exception("Failed to list buckets")
+            return []
+
+    def create_bucket(self, name: str | None) -> None:
+        """
+        Create a bucket with the given name, or using the name taken from environment variables
+
+        Args:
+            name: Name of the bucket or None to use the environment variable
+        """
+        if name is None:
+            name = self.settings.bucket_name
+        try:
+            bucket = self.client.bucket(name)
+            bucket.create()
+            self.logger.info("Successfully created bucket: {name}", name=name)
+        except GoogleCloudError:
+            self.logger.exception("Failed to create bucket {name}", name=name)
