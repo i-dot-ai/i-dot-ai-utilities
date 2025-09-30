@@ -29,7 +29,8 @@ classifiers = [
 dependencies = [
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
-    "boto3>=1.38.23,<2.0.0",
+    "boto3>=1.40.41",
+    "boto3-stubs[s3]>=1.40.41",
     "litellm>=1.77.1",
     "minio>=7.2.15",
     "requests>=2.32.3",
@@ -147,7 +148,6 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
-    "types-boto3-custom",
     "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
@@ -171,6 +171,3 @@ filterwarnings = [
     "ignore:.*Expected.*fields but got.*:UserWarning",
     "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
 ]
-
-[tool.uv.sources]
-types-boto3-custom = { path = "vendored/types_boto3_custom-1.40.31-py3-none-any.whl" }
