@@ -172,21 +172,3 @@ file_store.upload_json("file_name.txt", {"arg1": 1})
 ``` python
 file_store.download_json("file_name.txt")
 ```
-
-### Regenerating S3 boto types
-
-Boto3 specifically suffers with a lack of `types` support. To get around this,
-we built and installed the `whl` located at `../vendored` which contains a 3rd-party `types` package for boto3.
-Version `1.40.31` of boto3 was used for this originally.
-
-To update the `whl` run the following command:
-
-``` commandline
-  uvx mypy_boto3_builder ./vendored --download-static-stubs --product types-boto3-custom --output-type wheel --services s3
-```
-
-Followed by this to install them using uv:
-
-```commandline
-  uv add --dev vendored/types_boto3_custom-1.40.31-py3-none-any.whl
-```
