@@ -4,6 +4,7 @@ from typing import Any, BinaryIO
 from azure.storage.blob import BlobServiceClient
 from google.cloud.storage import Client
 from mypy_boto3_s3.client import S3Client
+from mypy_boto3_s3.type_defs import BucketTypeDef
 
 
 class FileStore(ABC):
@@ -85,7 +86,7 @@ class FileStore(ABC):
     @abstractmethod
     def list_buckets(
         self,
-    ) -> list[dict]:
+    ) -> list[dict] | list[BucketTypeDef]:
         pass
 
     @abstractmethod
