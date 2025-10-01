@@ -1,13 +1,11 @@
 import json
-from typing import TYPE_CHECKING, Any, BinaryIO, Unpack
-
-if TYPE_CHECKING:
-    from types_boto3_s3.type_defs import CopySourceTypeDef
+from typing import Any, BinaryIO, Unpack
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from types_boto3_s3 import S3Client
+from mypy_boto3_s3.client import S3Client
+from mypy_boto3_s3.type_defs import BucketTypeDef, CopySourceTypeDef
 
 from i_dot_ai_utilities.file_store.main import FileStore
 from i_dot_ai_utilities.file_store.settings import Settings
@@ -26,6 +24,7 @@ class S3FileStore(FileStore):
         depending on the environment variable `ENVIRONMENT`
         :return: Boto3 client with an S3 session to either minio or AWS s3
         """
+        client: S3Client
         if self.settings.environment.lower() in ["local", "test"]:
             # Filter out any conflicting kwargs that we're setting explicitly
             filtered_kwargs = {
@@ -34,7 +33,7 @@ class S3FileStore(FileStore):
                 if k not in ["endpoint_url", "aws_access_key_id", "aws_secret_access_key", "config"]
             }
 
-            return boto3.client(  # type: ignore[misc]
+            client = boto3.client(  # type: ignore[call-overload]
                 "s3",
                 endpoint_url=self.settings.minio_address,
                 aws_access_key_id=self.settings.aws_access_key_id,
@@ -42,11 +41,12 @@ class S3FileStore(FileStore):
                 config=Config(signature_version="s3v4"),
                 **filtered_kwargs,  # type: ignore[arg-type]
             )
+            return client
         else:
             # Filter out profile_name which isn't valid for session.client
-            client_kwargs = {k: v for k, v in kwargs.items() if k != "profile_name"}
-            session = boto3.Session(self.settings.aws_region)
-            return session.client("s3", **client_kwargs)  # type: ignore[misc, arg-type]
+            client_kwargs = {k: v for k, v in kwargs.items() if k != "profile_name"}  # type: ignore[ref-def]
+            client = boto3.client("s3", **client_kwargs)  # type: ignore[call-overload]
+            return client
 
     def __init__(self, logger: StructuredLogger, settings: Settings, **kwargs: Unpack[S3ClientKwargs]) -> None:
         """
@@ -123,7 +123,18 @@ class S3FileStore(FileStore):
         key = self.__prefix_key(key)
         try:
             response = self.client.get_object(Bucket=bucket, Key=key)
-            content: bytes | str | None = response["Body"].read()
+            content: bytes = response["Body"].read()
+
+            if as_text:
+                try:
+                    result: str = content.decode(encoding)
+                except UnicodeDecodeError:
+                    self.logger.exception(
+                        "Failed to decode object {key} with encoding {encoding}", key=key, encoding=encoding
+                    )
+                    return None
+                else:
+                    return result
         except ClientError as exception:
             if exception.response["Error"]["Code"] == "NoSuchKey":
                 self.logger.warning("Object not found: {key}", key=key)
@@ -131,9 +142,6 @@ class S3FileStore(FileStore):
                 self.logger.exception("Failed to read object {key}", key=key)
             return None
         else:
-            if as_text and type(content) is bytes:
-                result: str = content.decode(encoding)
-                return result
             return content
 
     def update_object(
@@ -372,3 +380,33 @@ class S3FileStore(FileStore):
         except json.JSONDecodeError:
             self.logger.exception("Failed to parse JSON from {key}", key=key)
             return None
+
+    def list_buckets(self) -> list[dict] | list[BucketTypeDef]:
+        """
+        List available buckets
+
+        Returns:
+            A list of dicts containing bucket information
+        """
+        try:
+            buckets: list[BucketTypeDef] = self.client.list_buckets()["Buckets"]
+        except ClientError:
+            self.logger.exception("Failed to list buckets")
+            return []
+        else:
+            return buckets
+
+    def create_bucket(self, name: str | None) -> None:
+        """
+        Create a bucket with the given name, or using the name taken from environment variables
+
+        Args:
+            name: Name of the bucket or None to use the environment variable
+        """
+        if name is None:
+            name = self.settings.bucket_name
+        try:
+            self.client.create_bucket(Bucket=name)
+            self.logger.info("Successfully created bucket: {name}", name=name)
+        except ClientError:
+            self.logger.exception("Failed to create bucket {name}", name=name)

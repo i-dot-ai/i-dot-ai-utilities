@@ -55,10 +55,4 @@ class S3ClientKwargs(TypedDict, total=False):
     aws_secret_access_key: str | None
     aws_session_token: str | None
     config: Config | None
-    profile_name: str | None
-    role_arn: str | None
-    role_session_name: str | None
-    external_id: str | None
-    mfa_serial: str | None
-    mfa_token: str | None
-    duration_seconds: int | None
+    aws_account_id: str | None

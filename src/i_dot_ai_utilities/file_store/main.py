@@ -3,12 +3,13 @@ from typing import Any, BinaryIO
 
 from azure.storage.blob import BlobServiceClient
 from google.cloud.storage import Client
-from types_boto3_s3 import S3Client as BotoS3Client
+from mypy_boto3_s3.client import S3Client
+from mypy_boto3_s3.type_defs import BucketTypeDef
 
 
 class FileStore(ABC):
     @abstractmethod
-    def get_client(self) -> BotoS3Client | BlobServiceClient | Client:
+    def get_client(self) -> S3Client | BlobServiceClient | Client:
         pass
 
     @abstractmethod
@@ -80,4 +81,14 @@ class FileStore(ABC):
         self,
         key: str,
     ) -> dict | list | None:
+        pass
+
+    @abstractmethod
+    def list_buckets(
+        self,
+    ) -> list[dict] | list[BucketTypeDef]:
+        pass
+
+    @abstractmethod
+    def create_bucket(self, name: str) -> None:
         pass

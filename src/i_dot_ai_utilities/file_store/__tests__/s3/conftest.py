@@ -3,7 +3,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from botocore.exceptions import ClientError
-from types_boto3_s3 import S3Client
+from mypy_boto3_s3 import S3Client
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.type_defs import ObjectIdentifierTypeDef
 
 from i_dot_ai_utilities.file_store.factory import create_file_store
 from i_dot_ai_utilities.file_store.main import FileStore
@@ -12,9 +15,6 @@ from i_dot_ai_utilities.file_store.types.file_store_destination_enum import File
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
-
-if TYPE_CHECKING:
-    from types_boto3_s3.type_defs import ObjectIdentifierTypeDef
 
 settings = Settings()  # type: ignore[call-arg]
 

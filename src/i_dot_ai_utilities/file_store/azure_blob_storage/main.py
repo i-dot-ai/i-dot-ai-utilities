@@ -388,3 +388,32 @@ class AzureFileStore(FileStore):
         except json.JSONDecodeError:
             self.logger.exception("Failed to parse JSON from {key}", key=key)
             return None
+
+    def list_buckets(self) -> list[dict]:
+        """
+        List available containers
+
+        Returns:
+            A list of dicts containing the name and creation time for each container
+        """
+        try:
+            containers = self.client.list_containers()
+            return [{"Name": container.name, "CreationTime": container.last_modified} for container in containers]
+        except AzureError:
+            self.logger.exception("Failed to list containers")
+            return []
+
+    def create_bucket(self, name: str | None) -> None:
+        """
+        Create a container with the given name, or using the name taken from environment variables
+
+        Args:
+            name: Name of the container or None to use the environment variable
+        """
+        if name is None:
+            name = self.settings.bucket_name
+        try:
+            self.client.create_container(name)
+            self.logger.info("Successfully created container: {name}", name=name)
+        except AzureError:
+            self.logger.exception("Failed to create container {name}", name=name)
