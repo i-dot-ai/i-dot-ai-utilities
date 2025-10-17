@@ -31,8 +31,6 @@ dependencies = [
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
     "structlog>=25.4.0",
-    "ecologits>=0.8.2",
-    "langfuse>=3.4.0",
     "typing_extensions>=4.0.0",
 ]
 
@@ -67,6 +65,9 @@ file_store = [
 litellm = [
     "litellm>=1.77.1",
     "requests>=2.32.3",
+    "rapidfuzz>=3.14.1",
+    "ecologits>=0.8.2",
+    "langfuse>=3.4.0",
 ]
 
 # Metrics module - No additional dependencies beyond logging
@@ -79,6 +80,9 @@ all = [
     "minio>=7.2.15",
     "litellm>=1.77.1",
     "requests>=2.32.3",
+    "rapidfuzz>=3.14.1",
+    "ecologits>=0.8.2",
+    "langfuse>=3.4.0",
     "google-cloud-storage>=3.3.1",
     "azure-core>=1.35.1",
     "azure-storage-blob>=12.26.0",
