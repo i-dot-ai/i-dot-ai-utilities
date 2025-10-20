@@ -3,6 +3,28 @@
 `i-dot-ai-utilities` is a python package used and developed by the i.AI team within DSIT.
 It provides common features used in many of our applications.
 
+## Installation
+
+When installing the package, the base package comes with only the `logger` module, to install more use `extras`. The following extras are available:
+
+- auth
+- file_store
+- litellm
+- metrics
+- all
+
+To install the package, use your package manager of choice:
+
+```bash
+pip install "i-dot-ai-utilities[all]"
+
+poetry add "i-dot-ai-utilities[all]"
+
+uv pip install "i-dot-ai-utilities[all]"
+```
+
+Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
+
 ## Features
 
 ### Current features:

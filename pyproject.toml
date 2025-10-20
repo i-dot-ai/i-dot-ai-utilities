@@ -26,33 +26,66 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
+# Default dependencies - only includes logging module dependencies
 dependencies = [
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
-    "boto3>=1.40.41",
-    "boto3-stubs[s3]>=1.40.41",
-    "litellm>=1.77.1",
-    "minio>=7.2.15",
-    "requests>=2.32.3",
     "structlog>=25.4.0",
-    "ecologits>=0.8.2",
-    "rapidfuzz>=3.14.1",
-    "langfuse>=3.4.0",
     "typing_extensions>=4.0.0",
-    "google-cloud-storage>=3.3.1",
-    "azure-core>=1.35.1",
-    "azure-storage-blob>=12.26.0",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/i-dot-ai/i-dot-ai-utilities"
 
 [project.optional-dependencies]
+# Development dependencies
 dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "ruff>=0.12.2",
     "mypy>=1.15.0",
+]
+
+# Auth module - Adds HTTP request capabilities
+auth = [
+    "requests>=2.32.3",
+]
+
+# File store module - Adds cloud storage support (AWS S3, Azure Blob, GCP Cloud Storage, MinIO)
+file_store = [
+    "boto3>=1.40.41",
+    "boto3-stubs[s3]>=1.40.41",
+    "minio>=7.2.15",
+    "google-cloud-storage>=3.3.1",
+    "azure-core>=1.35.1",
+    "azure-storage-blob>=12.26.0",
+]
+
+# LiteLLM module - Adds LLM integration capabilities
+litellm = [
+    "litellm>=1.77.1",
+    "requests>=2.32.3",
+    "rapidfuzz>=3.14.1",
+    "ecologits>=0.8.2",
+    "langfuse>=3.4.0",
+]
+
+# Metrics module - No additional dependencies beyond logging
+metrics = []
+
+# Install all optional modules
+all = [
+    "boto3>=1.40.41",
+    "boto3-stubs[s3]>=1.40.41",
+    "minio>=7.2.15",
+    "litellm>=1.77.1",
+    "requests>=2.32.3",
+    "rapidfuzz>=3.14.1",
+    "ecologits>=0.8.2",
+    "langfuse>=3.4.0",
+    "google-cloud-storage>=3.3.1",
+    "azure-core>=1.35.1",
+    "azure-storage-blob>=12.26.0",
 ]
 
 [tool.mypy]
