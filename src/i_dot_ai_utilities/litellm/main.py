@@ -1,3 +1,4 @@
+import os
 import warnings
 from collections.abc import Generator
 from functools import lru_cache
@@ -76,7 +77,14 @@ class LiteLLMHandler:
                 model=self.chat_model,
             )
         if settings.langfuse_public_key and settings.langfuse_secret_key:
-            self.logger.info("Langfuse callback configured by environment variables")
+            os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+            os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+            if settings.langfuse_host:
+                os.environ["LANGFUSE_HOST"] = settings.langfuse_host
+            self.logger.info(
+                "Langfuse callback configured by environment variables to host: {langfuse_host}",
+                langfuse_host=(settings.langfuse_host or "Default host"),
+            )
             litellm.success_callback = ["langfuse"]
         try:
             response = requests.get(settings.api_base, timeout=60)

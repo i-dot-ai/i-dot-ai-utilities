@@ -17,5 +17,6 @@ class Settings(BaseSettings):
     timeout: int = Field(default=30, description="Request timeout in seconds")
     langfuse_public_key: str | None = Field(default=None, description="Public key for langfuse")
     langfuse_secret_key: str | None = Field(default=None, description="Secret key for langfuse")
+    langfuse_host: str | None = Field(default=None, description="Custom host for langfuse callback")
 
     model_config = SettingsConfigDict(extra="ignore", env_prefix="IAI_LITELLM_", case_sensitive=False)
