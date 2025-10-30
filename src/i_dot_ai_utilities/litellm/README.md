@@ -37,8 +37,9 @@ Please set the following settings:
 - `IAI_LITELLM_TEMPERATURE: float`: (Optional) The temperature to use in model calls (this can be overridden in the function calls)
 - `IAI_LITELLM_MAX_TOKENS: int`: (Optional) The max tokens to use when calling LiteLLM (this can be overridden in the function calls)
 - `IAI_LITELLM_MAX_TIMEOUT: int`: (Optional) The timeout for calls to LiteLLM
-- `IAI_LITELLM_LANGFUSE_PUBLIC_KEY: str`: (Optional) The public key to connect LiteLLM callbacks to langfuse. We recommend not using this at the minute.
-- `IAI_LITELLM_LANGFUSE_SECRET_KEY: str`: (Optional) The secret key to connect LiteLLM callbacks to langfuse We recommend not using this at the minute.
+- `IAI_LITELLM_LANGFUSE_PUBLIC_KEY: str`: (Optional) The public key to connect LiteLLM callbacks to langfuse
+- `IAI_LITELLM_LANGFUSE_SECRET_KEY: str`: (Optional) The secret key to connect LiteLLM callbacks to langfuse
+- `IAI_LITELLM_LANGFUSE_HOST: str`: (Optional) The custom host to connect LiteLLM callbacks to langfuse
 
 <br>
 
