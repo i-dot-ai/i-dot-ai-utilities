@@ -85,7 +85,7 @@ class LiteLLMHandler:
                 "Langfuse callback configured by environment variables to host: {langfuse_host}",
                 langfuse_host=(settings.langfuse_host or "Default host"),
             )
-            litellm.success_callback = ["langfuse"]
+            litellm.success_callback = ["langfuse_otel"]
         try:
             response = requests.get(settings.api_base, timeout=60)
             response.raise_for_status()
