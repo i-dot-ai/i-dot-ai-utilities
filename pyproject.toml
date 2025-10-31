@@ -59,6 +59,7 @@ file_store = [
     "google-cloud-storage>=3.3.1",
     "azure-core>=1.35.1",
     "azure-storage-blob>=12.26.0",
+    "grpcio-status>=1.76.0",
 ]
 
 # LiteLLM module - Adds LLM integration capabilities

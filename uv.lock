@@ -1011,6 +1011,20 @@ wheels = [
 ]
 
 [[package]]
+name = "grpcio-status"
+version = "1.76.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos" },
+    { name = "grpcio" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/46/e9f19d5be65e8423f886813a2a9d0056ba94757b0c5007aa59aed1a961fa/grpcio_status-1.76.0.tar.gz", hash = "sha256:25fcbfec74c15d1a1cb5da3fab8ee9672852dc16a5a9eeb5baf7d7a9952943cd", size = 13679, upload-time = "2025-10-21T16:28:52.545Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/cc/27ba60ad5a5f2067963e6a858743500df408eb5855e98be778eaef8c9b02/grpcio_status-1.76.0-py3-none-any.whl", hash = "sha256:380568794055a8efbbd8871162df92012e0228a5f6dffaf57f2a00c534103b18", size = 14425, upload-time = "2025-10-21T16:28:40.853Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1121,6 +1135,7 @@ file-store = [
     { name = "boto3" },
     { name = "boto3-stubs", extra = ["s3"] },
     { name = "google-cloud-storage" },
+    { name = "grpcio-status" },
     { name = "minio" },
 ]
 litellm = [
@@ -1162,6 +1177,7 @@ requires-dist = [
     { name = "ecologits", marker = "extra == 'litellm'", specifier = ">=0.8.2" },
     { name = "google-cloud-storage", marker = "extra == 'all'", specifier = ">=3.3.1" },
     { name = "google-cloud-storage", marker = "extra == 'file-store'", specifier = ">=3.3.1" },
+    { name = "grpcio-status", marker = "extra == 'file-store'", specifier = ">=1.76.0" },
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.4.0" },
     { name = "langfuse", marker = "extra == 'litellm'", specifier = ">=3.4.0" },
     { name = "litellm", marker = "extra == 'all'", specifier = ">=1.77.1" },
