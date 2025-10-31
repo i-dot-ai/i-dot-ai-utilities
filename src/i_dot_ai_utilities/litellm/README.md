@@ -52,6 +52,9 @@ Please set the following settings:
 > Note that the functions will return custom exceptions for most errors that occur within the package.
 > This is due to the underlying LiteLLM SDK returning most errors as generic `OpenAIError` exceptions
 
+
+> When using Gemini models, e.g. `gemini-2.5-flash`, please use the openrouter provider when calling the models.
+> e.g. `openrouter/gemini-2.5-flash`, and not `vertex_ai/gemini-2.5-flash` or `gemini/gemini-2.5-flash`
 <br>
 
 ***
