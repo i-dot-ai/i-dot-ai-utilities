@@ -63,7 +63,7 @@ file_store = [
 
 # LiteLLM module - Adds LLM integration capabilities
 litellm = [
-    "litellm>=1.77.1",
+    "litellm>=1.79.0",
     "requests>=2.32.3",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
