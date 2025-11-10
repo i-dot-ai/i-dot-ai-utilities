@@ -95,7 +95,7 @@ class LiteLLMHandler:
         except (RequestException, requests.HTTPError):
             self.logger.exception("Failed to connect to API")
 
-    def _log_impacts(self, impacts: ImpactsOutput) -> None:
+    def _log_impacts(self, model_name: str, token_input: int, token_output: int, impacts: ImpactsOutput) -> None:
         """Helper method to log impact data from ecologits response"""
         electricity_unit = (impacts.energy.unit if impacts.energy else 0,)
         gwp_unit = (impacts.gwp.unit if impacts.gwp else 0,)
@@ -163,6 +163,9 @@ class LiteLLMHandler:
         )
         self.logger.info(
             "Log purpose {log_purpose}. "
+            "Model used {model_name}. "
+            "Tokens input {token_input}. "
+            "Tokens output {token_output}. "
             "Carbon cost for completion call in project {project_name}. "
             "Electricity total {electricity_unit}: "
             "{electricity_value_min} to {electricity_value_max}. "
@@ -170,6 +173,9 @@ class LiteLLMHandler:
             "Abiotic resource depletion {adpe_unit}: {adpe_value_min} to {adpe_value_max}. "
             "Primary source energy used {pe_unit}: {pe_value_min} to {pe_value_max}.",
             log_purpose="Carbon aggregation",
+            model_name=model_name,
+            token_input=token_input,
+            token_output=token_output,
             project_name=settings.project_name,
             electricity_unit=electricity_unit,
             electricity_value_min=electricity_value_min,
@@ -220,7 +226,12 @@ class LiteLLMHandler:
             )
 
             if response.impacts:
-                self._log_impacts(response.impacts)
+                self._log_impacts(
+                    model or self.chat_model,
+                    response.usage.prompt_tokens,  # type: ignore[attr-defined]
+                    response.usage.completion_tokens,  # type: ignore[attr-defined]
+                    response.impacts,
+                )
             self.logger.info(
                 "Chat completion called for model {model}, with {number_of_messages} messages",
                 model=model or self.chat_model,
@@ -284,7 +295,12 @@ class LiteLLMHandler:
                     # Only the final chunk contains the impacts object
                     final_chunk = chunks[-1]
                     if final_chunk.get("impacts", None):
-                        self._log_impacts(final_chunk.impacts)
+                        self._log_impacts(
+                            model or self.chat_model,
+                            final_chunk.usage.prompt_tokens,
+                            final_chunk.usage.completion_tokens,
+                            final_chunk.impacts,
+                        )
 
                 self.logger.info(
                     "Chat completion stream called for model {model}, with {number_of_messages} messages",
