@@ -1181,7 +1181,7 @@ requires-dist = [
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.4.0" },
     { name = "langfuse", marker = "extra == 'litellm'", specifier = ">=3.4.0" },
     { name = "litellm", marker = "extra == 'all'", specifier = ">=1.77.1" },
-    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.0" },
+    { name = "litellm", marker = "extra == 'litellm'", specifier = "==1.79.0" },
     { name = "minio", marker = "extra == 'all'", specifier = ">=7.2.15" },
     { name = "minio", marker = "extra == 'file-store'", specifier = ">=7.2.15" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15.0" },
