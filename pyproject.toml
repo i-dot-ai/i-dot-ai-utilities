@@ -28,8 +28,11 @@ classifiers = [
 
 # Default dependencies - only includes logging module dependencies
 dependencies = [
+    "cryptography==46.0.6",
+    "protobuf==6.33.5",
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
+    "requests==2.33.0",
     "structlog>=25.4.0",
     "typing_extensions>=4.0.0",
 ]
