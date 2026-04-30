@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "i-dot-ai-utilities"
-version = "0.0.1"
+version = "0.6.0"
 description = "Utilities for i.ai to use"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -76,6 +76,21 @@ litellm = [
 
 # Metrics module - No additional dependencies beyond logging
 metrics = []
+
+# Django module - Adds Django integration (e.g. StructuredLoggingMiddleware)
+django = [
+    "django>=4.2,<6.0",
+]
+
+# OTel module - Adds OpenTelemetry-backed Django middleware alternative.
+# Ships alongside the existing StructuredLoggingMiddleware; consumers opt in
+# via settings.MIDDLEWARE. See docs in src/i_dot_ai_utilities/logging/README.md.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+]
 
 # Install all optional modules
 all = [
@@ -179,6 +194,7 @@ line-ending = "auto"
 [dependency-groups]
 dev = [
     "bandit>=1.8.3",
+    "django>=4.2,<6.0",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",

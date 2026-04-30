@@ -32,3 +32,13 @@ lint:
 	uv run ruff check --fix
 	uv run mypy src/i_dot_ai_utilities/ --ignore-missing-imports
 	uv run bandit -ll -r src/i_dot_ai_utilities
+
+# Run the logging module's tests only. Requires no backing services, so works
+# inside the devcontainer (or anywhere without Docker Compose available).
+test-logging:
+	uv run pytest \
+		src/i_dot_ai_utilities/logging \
+		--cov-config=.coveragerc \
+		--cov src/i_dot_ai_utilities/logging \
+		--cov-report term-missing \
+		--cov-fail-under 75

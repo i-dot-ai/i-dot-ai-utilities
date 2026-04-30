@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import uuid
-from typing import TYPE_CHECKING, Any
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
@@ -23,8 +24,46 @@ from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigO
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
+    from i_dot_ai_utilities.logging.types.django_enrichment_schema import ExtractedDjangoContext
     from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import ExtractedFastApiContext
     from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import ExtractedLambdaContext
+
+
+# ---------------------------------------------------------------------------
+# Request-scope ownership
+# ---------------------------------------------------------------------------
+#
+# When a framework integration (e.g. ``StructuredLoggingMiddleware``) owns the
+# lifecycle of the structured-log context for the duration of a request, it
+# sets this contextvar with a sentinel token before rebuilding the context and
+# clears it in ``finally``. Inside that window, manual ``refresh_context``
+# calls with ``scope="manual"`` or ``scope="request"`` (typically from views
+# or helper utilities written before the middleware existed) are downgraded
+# to no-ops and a warning is emitted.
+#
+# The goal is to eliminate the silent de-correlation described in the security
+# review's residual finding: two independent callers fighting over the same
+# mutable ``structlog.contextvars`` state produce logs that look coherent but
+# are causally disconnected from the originating request.
+#
+# Job workers (e.g. RQ / Celery) legitimately need to reset context per-job
+# and pass ``scope="job"`` to opt out of the ownership check.
+
+REQUEST_SCOPE_OWNER_MIDDLEWARE: str = "middleware"
+
+_request_scope_owner: ContextVar[str | None] = ContextVar("i_dot_ai_utilities_request_scope_owner", default=None)
+
+RefreshScope = Literal["request", "job", "manual"]
+
+
+def _claim_request_scope(owner: str) -> object:
+    """Install a scope-ownership token. Returns the reset token for cleanup."""
+    return _request_scope_owner.set(owner)
+
+
+def _release_request_scope(token: object) -> None:
+    """Release a previously installed ownership token."""
+    _request_scope_owner.reset(token)  # type: ignore[arg-type]
 
 
 class StructuredLogger:
@@ -176,18 +215,58 @@ class StructuredLogger:
         safe_kwargs = self._normalise_kwargs(**{field_key: field_value})
         structlog.contextvars.bind_contextvars(**safe_kwargs)
 
-    def refresh_context(self, context_enrichers: list[ContextEnrichmentOptions] | None = None) -> None:
+    def refresh_context(
+        self,
+        context_enrichers: list[ContextEnrichmentOptions] | None = None,
+        scope: RefreshScope = "manual",
+    ) -> None:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
+        :param scope: The scope of the refresh. Callers inside a framework
+            integration that already owns the request's log-context lifecycle
+            (e.g. Django's ``StructuredLoggingMiddleware``) should be treated
+            as no-ops to avoid silent de-correlation of audit trails
+            (security finding: residual flaw). Pass ``"job"`` for background
+            workers that legitimately need to reset per-job context regardless
+            of any request scope. Defaults to ``"manual"``.
         """  # noqa: E501
+        owner = _request_scope_owner.get()
+        if owner is not None and scope in ("request", "manual"):
+            # A framework integration already owns the request-scoped context
+            # for this request. Skipping the clear prevents a second caller
+            # (view function, helper, third-party middleware) from wiping the
+            # middleware-bound trace_id / request_id / user attribution
+            # mid-request and producing log lines that cannot be correlated
+            # back to the originating HTTP request.
+            self._logger.warning(
+                "Warning(Logger): refresh_context called inside an active "
+                "middleware-owned request scope; clear skipped to preserve "
+                "request correlation. Pass scope='job' from background "
+                "workers that legitimately need to reset context.",
+                requested_scope=scope,
+                active_scope_owner=owner,
+            )
+            if context_enrichers is None:
+                return
+            # Still apply any new enrichers on top of the owned context so
+            # callers adding context aren't silently dropped — just don't
+            # clear what the middleware already bound.
+            self._apply_enrichers(context_enrichers)
+            return
+
         structlog.contextvars.clear_contextvars()
         self._upsert_base_context()
 
         if context_enrichers is None:
             return
 
-        additional_context: ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any] = {}
+        self._apply_enrichers(context_enrichers)
+
+    def _apply_enrichers(self, context_enrichers: list[ContextEnrichmentOptions]) -> None:
+        additional_context: (
+            ExtractedFastApiContext | ExtractedLambdaContext | ExtractedDjangoContext | dict[str, Any]
+        ) = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]

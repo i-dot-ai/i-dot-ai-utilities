@@ -5,9 +5,42 @@ import os
 
 import pytest
 
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
+from i_dot_ai_utilities.logging.structured_logger import (
+    REQUEST_SCOPE_OWNER_MIDDLEWARE,
+    StructuredLogger,
+    _claim_request_scope,
+    _release_request_scope,
+)
 from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
+
+# Optional Django imports for the scope-ownership-with-enricher test. These
+# are pytest-skipped when Django is unavailable, matching the middleware
+# test-suite's pattern.
+django = pytest.importorskip("django")
+
+from django.conf import settings as django_settings  # type: ignore[import-untyped]  # noqa: E402
+
+if not django_settings.configured:
+    django_settings.configure(
+        DEBUG=False,
+        ALLOWED_HOSTS=["*"],
+        DATABASES={},
+        INSTALLED_APPS=[],
+        MIDDLEWARE=[],
+        ROOT_URLCONF=__name__,
+        SECRET_KEY="test-secret-not-for-production",
+        USE_TZ=True,
+    )
+    django.setup()
+
+from django.test import RequestFactory  # type: ignore[import-untyped]  # noqa: E402
+
+from i_dot_ai_utilities.logging.types.enrichment_types import (  # noqa: E402
+    ContextEnrichmentType,
+)
+
+urlpatterns: list = []
 
 
 def test_simple_logger(capsys):
@@ -179,3 +212,104 @@ def test_log_name_set(capsys):
 
     assert parsed[0].get("logger_name") == __name__
     assert parsed[1].get("logger_name") == __name__
+
+
+# ---------------------------------------------------------------------------
+# Request-scope ownership (security finding: residual flaw)
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshContextScopeOwnership:
+    """Manual ``refresh_context()`` calls inside an active request scope are
+    no-ops with a warning, preventing silent de-correlation of audit trails.
+    """
+
+    def _parse(self, capsys):
+        captured = capsys.readouterr()
+        return [json.loads(line) for line in captured.out.strip().splitlines()]
+
+    def test_manual_refresh_inside_scope_is_no_op_and_warns(self, capsys):
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("bound_by_middleware", "value-that-must-survive")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            # Scope-unaware caller (e.g. an old view) tries to refresh.
+            logger.refresh_context()
+            logger.info("after manual refresh attempt")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        # A warning is logged informing the operator of the skipped clear.
+        warning_messages = [p.get("message", "") for p in parsed]
+        assert any("refresh_context" in m and "middleware-owned" in m for m in warning_messages), (
+            f"expected warning about skipped clear, got {warning_messages}"
+        )
+
+        # The post-refresh info log STILL carries the field bound before the
+        # scope-aware refresh attempt — i.e. the clear was skipped.
+        info_line = parsed[-1]
+        assert info_line.get("bound_by_middleware") == "value-that-must-survive"
+
+    def test_manual_refresh_outside_scope_clears_as_before(self, capsys):
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("temporary_field", "before-refresh")
+        logger.refresh_context()
+        logger.info("after refresh")
+
+        parsed = self._parse(capsys)
+        # No scope was claimed: the clear ran normally and the field is gone.
+        assert parsed[-1].get("temporary_field") is None
+
+    def test_job_scope_bypasses_ownership_check(self, capsys):
+        """Background workers pass ``scope='job'`` and must be able to clear
+        context even when a request scope is somehow still active (e.g. an
+        RQ worker running on the same thread as Gunicorn in dev)."""
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("stale_request_field", "leftover")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            logger.refresh_context(scope="job")
+            logger.info("after job refresh")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        # Job scope opts out of the ownership check — field is cleared.
+        assert parsed[-1].get("stale_request_field") is None
+
+    def test_enrichers_still_apply_when_clear_is_skipped(self, capsys):
+        """When the clear is skipped, enrichers passed to ``refresh_context``
+        should still be applied on top of the existing context so callers
+        that wanted to add fields aren't silently dropped.
+
+        Uses a real ``HttpRequest`` so the strict isinstance check in the
+        Django enricher (security finding A1) accepts it.
+        """
+        request = RequestFactory().get("/x")
+
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("keep_me", "from-middleware")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            logger.refresh_context(
+                context_enrichers=[
+                    {
+                        "type": ContextEnrichmentType.DJANGO,
+                        "object": request,
+                    }
+                ],
+            )
+            logger.info("after skipped-clear-with-enrichers")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        line = parsed[-1]
+        # Pre-existing field survived the skipped clear.
+        assert line.get("keep_me") == "from-middleware"
+        # Enricher-sourced field was still applied.
+        assert line.get("http.request.method") == "GET"

@@ -1,0 +1,134 @@
+# Sandbox compose stack for the i-dot-ai-utilities structured logger.
+#
+# Services:
+#   fastapi-app      - FastAPI demo, exercises ContextEnrichmentType.FASTAPI
+#   django-app       - Django demo, uses StructuredLoggingMiddleware (structlog-native)
+#   django-otel-app  - Django demo, uses StructuredLoggingMiddlewareOTel (OTel-backed)
+#   otelcol          - OTel Collector Contrib; tails docker json-file logs
+#   lgtm             - grafana/otel-lgtm all-in-one (Loki/Tempo/Mimir/Grafana)
+#   k6               - generates continuous traffic against the three apps
+#
+# Running:
+#   docker compose up --build
+#   open http://localhost:3000  (Grafana, anonymous admin)
+
+services:
+  fastapi-app:
+    build:
+      context: ./apps/fastapi-app
+    image: sandbox-fastapi-app:local
+    container_name: sandbox-fastapi-app
+    ports:
+      - "8001:8001"
+    volumes:
+      # Bind-mount the utility source read-only. The container pip-installs it
+      # in editable mode at start, so changes to the library are picked up on
+      # container restart without a rebuild.
+      - ../:/opt/utility:ro
+    environment:
+      APP_NAME: fastapi-demo
+      REPO: i-dot-ai-utilities-sandbox
+      ENVIRONMENT: sandbox
+    # Cap container log file size so disk usage doesn't grow unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "fastapi-app"
+
+  django-app:
+    build:
+      context: ./apps/django-app
+    image: sandbox-django-app:local
+    container_name: sandbox-django-app
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../:/opt/utility:ro
+    environment:
+      APP_NAME: django-demo
+      REPO: i-dot-ai-utilities-sandbox
+      ENVIRONMENT: sandbox
+      DJANGO_SETTINGS_MODULE: demo.settings
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "django-app"
+
+  django-otel-app:
+    build:
+      context: ./apps/django-otel-app
+    image: sandbox-django-otel-app:local
+    container_name: sandbox-django-otel-app
+    ports:
+      - "8003:8003"
+    volumes:
+      - ../:/opt/utility:ro
+    environment:
+      APP_NAME: django-otel-demo
+      REPO: i-dot-ai-utilities-sandbox
+      ENVIRONMENT: sandbox
+      DJANGO_SETTINGS_MODULE: demo.settings
+      # configure_otel_for_django reads ENVIRONMENT + APP_VERSION to populate
+      # the resource attributes on every span.
+      APP_VERSION: "0.0.1"
+    depends_on:
+      lgtm:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "django-otel-app"
+
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: sandbox-lgtm
+    ports:
+      - "3000:3000"    # Grafana UI
+      - "4317:4317"    # OTLP gRPC (for any direct OTLP clients)
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: sandbox-otelcol
+    # Docker's container log dir is root-owned and mode 0710 on Linux hosts
+    # (including colima's VM). Run as root so the filelog receiver can read it.
+    user: "0:0"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - lgtm
+
+  k6:
+    image: grafana/k6:latest
+    container_name: sandbox-k6
+    command: ["run", "/scripts/script.js"]
+    volumes:
+      - ./loadgen:/scripts:ro
+    environment:
+      FASTAPI_URL: http://fastapi-app:8001
+      DJANGO_URL: http://django-app:8002
+      DJANGO_OTEL_URL: http://django-otel-app:8003
+      # Override these at `docker compose run` time to shorten / lengthen
+      # a load run without editing the script.
+      K6_DURATION: "5m"
+      K6_VUS: "5"
+    depends_on:
+      fastapi-app:
+        condition: service_started
+      django-app:
+        condition: service_started
+      django-otel-app:
+        condition: service_started
+    restart: "no"

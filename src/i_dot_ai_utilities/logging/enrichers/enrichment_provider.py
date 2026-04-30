@@ -3,6 +3,9 @@ from typing import Any, cast
 from i_dot_ai_utilities.logging.enrichers.context_extractor import (
     ExtractedContextResult,
 )
+from i_dot_ai_utilities.logging.enrichers.django_enricher import (
+    DjangoEnricher,
+)
 from i_dot_ai_utilities.logging.enrichers.fargate_enricher import (
     FargateEnvironmentEnricher,
 )
@@ -15,6 +18,10 @@ from i_dot_ai_utilities.logging.enrichers.lambda_context_enricher import (
 )
 from i_dot_ai_utilities.logging.enrichers.lambda_environment_enricher import (
     LambdaEnvironmentEnricher,
+)
+from i_dot_ai_utilities.logging.types.django_enrichment_schema import (
+    DjangoRequestLike,
+    ExtractedDjangoContext,
 )
 from i_dot_ai_utilities.logging.types.enrichment_types import (
     ContextEnrichmentType,
@@ -32,6 +39,7 @@ from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import (
 class EnrichmentProvider:
     _fast_api_enricher: FastApiEnricher
     _lambda_enricher: LambdaContextEnricher
+    _django_enricher: DjangoEnricher
     _execution_environment_enricher: FargateEnvironmentEnricher | LambdaEnvironmentEnricher | None
     _execution_environment_context_cache: ExtractedContextResult = None
     _has_environment_context_extraction_ran = False
@@ -39,6 +47,7 @@ class EnrichmentProvider:
     def __init__(self, execution_environment: ExecutionEnvironmentType):
         self._fast_api_enricher = FastApiEnricher()
         self._lambda_enricher = LambdaContextEnricher()
+        self._django_enricher = DjangoEnricher()
 
         match execution_environment:
             case ExecutionEnvironmentType.FARGATE:
@@ -52,13 +61,15 @@ class EnrichmentProvider:
         self,
         self_logger: Any,
         enricher_type: ContextEnrichmentType,
-        enricher_object: RequestLike | LambdaContextLike,
-    ) -> ExtractedFastApiContext | ExtractedLambdaContext | None:
+        enricher_object: RequestLike | LambdaContextLike | DjangoRequestLike,
+    ) -> ExtractedFastApiContext | ExtractedLambdaContext | ExtractedDjangoContext | None:
         match enricher_type:
             case ContextEnrichmentType.FASTAPI:
                 return self._fast_api_enricher.extract_context(self_logger, cast("RequestLike", enricher_object))
             case ContextEnrichmentType.LAMBDA:
                 return self._lambda_enricher.extract_context(self_logger, cast("LambdaContextLike", enricher_object))
+            case ContextEnrichmentType.DJANGO:
+                return self._django_enricher.extract_context(self_logger, cast("DjangoRequestLike", enricher_object))
             case _:
                 self_logger.exception(
                     ("Exception(Logger): An enricher type of '{enricher_type}' was not recognised, no context added."),

@@ -1,0 +1,13 @@
+[project]
+name = "django-otel-demo"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = [
+    "django>=4.2,<6.0",
+    "gunicorn>=22.0",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+]
