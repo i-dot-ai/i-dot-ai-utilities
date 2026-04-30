@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "i-dot-ai-utilities"
-version = "0.0.1"
+version = "0.6.0"
 description = "Utilities for i.ai to use"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -76,6 +76,25 @@ litellm = [
 
 # Metrics module - No additional dependencies beyond logging
 metrics = []
+
+# Django module - Adds Django integration (DjangoUserIdMiddleware). The
+# Django middleware that handles request lifecycle logging
+# (StructuredLoggingMiddlewareOTel) lives under the [otel] extra; install
+# both extras together: `pip install "i-dot-ai-utilities[django,otel]"`.
+django = [
+    "django>=4.2,<6.0",
+]
+
+# OTel module - Adds the OpenTelemetry-backed Django middleware
+# (StructuredLoggingMiddlewareOTel) and its supporting setup helpers.
+# Consumers need both [django] and [otel] installed to wire the middleware
+# into a Django project. See docs in src/i_dot_ai_utilities/logging/README.md.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+]
 
 # Install all optional modules
 all = [
@@ -179,6 +198,7 @@ line-ending = "auto"
 [dependency-groups]
 dev = [
     "bandit>=1.8.3",
+    "django>=4.2,<6.0",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
@@ -188,6 +208,16 @@ dev = [
     "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
+    # OTel packages duplicate the `[otel]` optional-extra list intentionally
+    # so `uv sync` (dev group) alone is sufficient to run the full test
+    # suite. Without these, the OTel-backed middleware tests silently skip
+    # via `pytest.importorskip("opentelemetry")`, making `pytest --cov`
+    # look catastrophically low (see inclusion rationale in commit
+    # history). No production-consumer impact — only the dev group.
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
 ]
 
 [tool.hatch.build]

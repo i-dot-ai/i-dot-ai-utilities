@@ -5,8 +5,16 @@ import os
 
 import pytest
 
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
+from i_dot_ai_utilities.logging.structured_logger import (
+    REQUEST_SCOPE_OWNER_MIDDLEWARE,
+    StructuredLogger,
+    _claim_request_scope,
+    _release_request_scope,
+)
+from i_dot_ai_utilities.logging.types.enrichment_types import (
+    ContextEnrichmentType,
+    ExecutionEnvironmentType,
+)
 from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
 
@@ -179,3 +187,125 @@ def test_log_name_set(capsys):
 
     assert parsed[0].get("logger_name") == __name__
     assert parsed[1].get("logger_name") == __name__
+
+
+# ---------------------------------------------------------------------------
+# Request-scope ownership (security finding: residual flaw)
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshContextScopeOwnership:
+    """Manual ``refresh_context()`` calls inside an active request scope are
+    no-ops with a warning, preventing silent de-correlation of audit trails.
+    """
+
+    def _parse(self, capsys):
+        captured = capsys.readouterr()
+        return [json.loads(line) for line in captured.out.strip().splitlines()]
+
+    def test_manual_refresh_inside_scope_is_no_op_and_warns(self, capsys):
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("bound_by_middleware", "value-that-must-survive")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            # Scope-unaware caller (e.g. an old view) tries to refresh.
+            logger.refresh_context()
+            logger.info("after manual refresh attempt")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        # A warning is logged informing the operator of the skipped clear.
+        warning_messages = [p.get("message", "") for p in parsed]
+        assert any("refresh_context" in m and "middleware-owned" in m for m in warning_messages), (
+            f"expected warning about skipped clear, got {warning_messages}"
+        )
+
+        # The post-refresh info log STILL carries the field bound before the
+        # scope-aware refresh attempt — i.e. the clear was skipped.
+        info_line = parsed[-1]
+        assert info_line.get("bound_by_middleware") == "value-that-must-survive"
+
+    def test_manual_refresh_outside_scope_clears_as_before(self, capsys):
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("temporary_field", "before-refresh")
+        logger.refresh_context()
+        logger.info("after refresh")
+
+        parsed = self._parse(capsys)
+        # No scope was claimed: the clear ran normally and the field is gone.
+        assert parsed[-1].get("temporary_field") is None
+
+    def test_job_scope_bypasses_ownership_check(self, capsys):
+        """Background workers pass ``scope='job'`` and must be able to clear
+        context even when a request scope is somehow still active (e.g. an
+        RQ worker running on the same thread as Gunicorn in dev)."""
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("stale_request_field", "leftover")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            logger.refresh_context(scope="job")
+            logger.info("after job refresh")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        # Job scope opts out of the ownership check — field is cleared.
+        assert parsed[-1].get("stale_request_field") is None
+
+    def test_enrichers_still_apply_when_clear_is_skipped(self, capsys):
+        """When the clear is skipped, enrichers passed to ``refresh_context``
+        should still be applied on top of the existing context so callers
+        that wanted to add fields aren't silently dropped.
+
+        Uses a minimal FastAPI-shaped request object — the FastAPI
+        enricher validates structural conformance to ``RequestLike`` via
+        a runtime-checkable Protocol.
+        """
+        from starlette.datastructures import URL, Headers  # noqa: PLC0415
+        from starlette.requests import Request  # noqa: PLC0415
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/x",
+            "raw_path": b"/x",
+            "query_string": b"",
+            "headers": Headers({"host": "testserver"}).raw,
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 12345),
+            "http_version": "1.1",
+            "root_path": "",
+        }
+        request = Request(scope)
+        # Sanity: make sure the enricher's expected surface is present.
+        assert request.method == "GET"
+        assert isinstance(request.url, URL)
+
+        logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
+        logger.set_context_field("keep_me", "from-middleware")
+
+        token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
+        try:
+            logger.refresh_context(
+                context_enrichers=[
+                    {
+                        "type": ContextEnrichmentType.FASTAPI,
+                        "object": request,
+                    }
+                ],
+            )
+            logger.info("after skipped-clear-with-enrichers")
+        finally:
+            _release_request_scope(token)
+
+        parsed = self._parse(capsys)
+        line = parsed[-1]
+        # Pre-existing field survived the skipped clear.
+        assert line.get("keep_me") == "from-middleware"
+        # Enricher-sourced field was still applied. FastApiEnricher
+        # nests its output under ``request`` per the existing schema.
+        assert line.get("request", {}).get("method") == "GET"
