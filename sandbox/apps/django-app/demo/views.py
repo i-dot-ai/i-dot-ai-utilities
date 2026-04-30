@@ -1,6 +1,8 @@
-"""Django views. The StructuredLoggingMiddleware handles refresh_context / lifecycle logging;
-these handlers only add business-level log events and exercise `set_context_field` and
-`logger.exception`.
+"""Django views for the sandbox demo.
+
+The middleware handles refresh_context / lifecycle logging; these
+handlers only add business-level log events and exercise
+`set_context_field` and `logger.exception`.
 """
 
 from __future__ import annotations
@@ -50,6 +52,6 @@ def boom(request: HttpRequest) -> HttpResponse:
 
 
 def health(request: HttpRequest) -> JsonResponse:
-    # Path is in the middleware's default excluded prefixes, so no request_started /
-    # request_completed events are emitted for this handler.
+    # Path matches the middleware's default excluded prefixes, so no
+    # request_started / request_completed events are emitted.
     return JsonResponse({"status": "ok"})

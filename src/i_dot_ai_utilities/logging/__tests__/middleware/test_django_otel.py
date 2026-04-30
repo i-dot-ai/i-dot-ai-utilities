@@ -1068,3 +1068,215 @@ class TestMiddlewareSurface:
         sentinel = HttpResponse(status=204)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: sentinel)
         assert mw(rf.get("/")) is sentinel
+
+
+# ---------------------------------------------------------------------------
+# Missing TracerProvider warning (configuration foot-gun protection)
+# ---------------------------------------------------------------------------
+
+
+class TestTracerProviderMissingWarning:
+    """If a consumer wires ``StructuredLoggingMiddlewareOTel`` into
+    ``settings.MIDDLEWARE`` but forgets to call
+    ``configure_otel_for_django`` at process startup, the logs degrade
+    silently: no ``trace_id`` / ``span_id`` on events, no spans exported.
+    The middleware detects this state at init and emits one loud WARNING
+    so operators know to fix their boot sequence."""
+
+    def _override_provider(self, replacement: Any) -> Any:
+        """Swap in an alternative tracer provider bypassing OTel's
+        'no-override' guard. Returns the previous internal state so the
+        test can restore it afterwards.
+        """
+        from opentelemetry import trace as _trace  # noqa: PLC0415
+
+        prev = (
+            _trace._TRACER_PROVIDER,  # noqa: SLF001
+            _trace._TRACER_PROVIDER_SET_ONCE._done,  # noqa: SLF001
+        )
+        _trace._TRACER_PROVIDER = replacement  # noqa: SLF001
+        # Force the once-guard back to "not set" so subsequent code paths
+        # see the replacement cleanly.
+        _trace._TRACER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
+        return prev
+
+    def _restore_provider(self, prev: Any) -> None:
+        from opentelemetry import trace as _trace  # noqa: PLC0415
+
+        _trace._TRACER_PROVIDER = prev[0]  # noqa: SLF001
+        _trace._TRACER_PROVIDER_SET_ONCE._done = prev[1]  # noqa: SLF001
+
+    def test_warning_emitted_when_no_sdk_provider(self, logger, settings_sandbox):
+        """With the API's default ``ProxyTracerProvider`` (or any non-SDK
+        provider) installed, init must emit the missing-provider WARNING.
+        """
+        from opentelemetry.trace import ProxyTracerProvider  # noqa: PLC0415
+
+        settings_sandbox(I_DOT_AI_LOGGER=logger)
+        prev = self._override_provider(ProxyTracerProvider())
+        try:
+            StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
+        finally:
+            self._restore_provider(prev)
+
+        missing = logger.events_for(
+            "structured_logging_middleware_otel_tracer_provider_missing"
+        )
+        assert len(missing) == 1
+        event = missing[0]
+        assert event["log_level"] == "warning"
+        assert event["actual_provider"] == "ProxyTracerProvider"
+        assert "configure_otel_for_django" in event["remediation"]
+
+    def test_no_warning_when_sdk_provider_installed(self, logger, settings_sandbox):
+        """The module-level ``configure_otel_for_django`` call in this
+        test file already installed a real SDK provider, so a fresh
+        middleware construction must NOT emit the warning.
+        """
+        settings_sandbox(I_DOT_AI_LOGGER=logger)
+        StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
+        missing = logger.events_for(
+            "structured_logging_middleware_otel_tracer_provider_missing"
+        )
+        assert len(missing) == 0
+
+    def test_warning_emission_failure_does_not_crash_init(self, settings_sandbox, capsys):
+        """A broken logger on the warning path must fall back to stderr
+        rather than breaking worker boot.
+        """
+        from opentelemetry.trace import ProxyTracerProvider  # noqa: PLC0415
+
+        class BrokenWarnLogger:
+            """Logger whose ``warning`` raises — everything else is fine."""
+
+            def info(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def warning(self, *_a: Any, **_k: Any) -> None:
+                msg = "logger warning is broken"
+                raise RuntimeError(msg)
+
+            def error(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def exception(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def refresh_context(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def set_context_field(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+        settings_sandbox(I_DOT_AI_LOGGER=BrokenWarnLogger())
+        prev = self._override_provider(ProxyTracerProvider())
+        try:
+            # Must not raise.
+            StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
+        finally:
+            self._restore_provider(prev)
+
+        captured = capsys.readouterr()
+        assert "tracer-provider-missing warning failed" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Startup-emission stderr fallbacks
+# ---------------------------------------------------------------------------
+
+
+class TestStartupStderrFallback:
+    """Defence-in-depth for the three startup emission paths
+    (``_emit_startup_log``, ``_emit_forbidden_headers_warning``,
+    ``_warn_if_tracer_provider_missing``). An observability library MUST
+    NOT crash the worker when its own logger is broken — the fallback is
+    a ``print`` to stderr so operators can still see something went
+    wrong without Django failing to serve.
+
+    The tracer-provider-missing stderr path is already covered in
+    ``TestTracerProviderMissingWarning``; these tests cover the other
+    two, and together the three stderr guards make the "worker boot
+    with a half-broken logger" path tractable.
+    """
+
+    def test_startup_info_log_failure_falls_back_to_stderr(
+        self, settings_sandbox, capsys
+    ):
+        class BrokenInfoLogger:
+            """Logger whose ``info`` raises — exercises the first stderr
+            fallback path in ``_emit_startup_log``."""
+
+            def info(self, *_a: Any, **_k: Any) -> None:
+                msg = "info is broken"
+                raise RuntimeError(msg)
+
+            def warning(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def error(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def exception(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def refresh_context(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def set_context_field(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+        settings_sandbox(I_DOT_AI_LOGGER=BrokenInfoLogger())
+        # Must not raise despite ``info`` failing during the startup emit.
+        StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
+
+        captured = capsys.readouterr()
+        assert "startup log emission failed" in captured.err
+        # Specifically names the underlying exception class so
+        # operators can grep for it.
+        assert "RuntimeError" in captured.err
+
+    def test_forbidden_headers_warning_failure_falls_back_to_stderr(
+        self, settings_sandbox, capsys
+    ):
+        """When a forbidden header is supplied AND the logger's
+        ``warning`` call raises, the middleware still constructs
+        successfully with a stderr fallback naming the failure.
+        """
+
+        class BrokenWarningLogger:
+            """Logger whose ``warning`` raises. ``info`` is fine so the
+            startup log path does NOT fall back to stderr — only the
+            forbidden-headers warning does.
+            """
+
+            def info(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def warning(self, *_a: Any, **_k: Any) -> None:
+                msg = "warning is broken"
+                raise RuntimeError(msg)
+
+            def error(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def exception(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def refresh_context(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def set_context_field(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+        settings_sandbox(
+            I_DOT_AI_LOGGER=BrokenWarningLogger(),
+            # ``Authorization`` is on ``FORBIDDEN_HEADER_NAMES`` so this
+            # will trigger the rejection path at startup.
+            I_DOT_AI_LOGGING_HEADER_ALLOWLIST=("Authorization", "X-Safe"),
+        )
+        # Must not raise.
+        StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
+
+        captured = capsys.readouterr()
+        assert "forbidden-header warning failed" in captured.err
+        assert "RuntimeError" in captured.err

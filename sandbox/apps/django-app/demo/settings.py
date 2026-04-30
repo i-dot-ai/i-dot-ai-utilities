@@ -1,4 +1,13 @@
-"""Minimal Django settings for the sandbox demo app."""
+"""Minimal Django settings for the sandbox demo app.
+
+HTTP request attributes (method, path, route, status code, etc.) live on
+OTel spans rather than the log record. Trace correlation on log records
+comes from the `otel_trace_context_processor` structlog processor —
+installed from `demo.apps.DemoConfig.ready()`.
+
+``DjangoUserIdMiddleware`` is wired after the OTel middleware so that
+authenticated-user attribution lands on the active request scope.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +29,7 @@ os.environ.setdefault("REPO", "i-dot-ai-utilities-sandbox")
 os.environ.setdefault("ENVIRONMENT", "sandbox")
 
 # ---------------------------------------------------------------------------
-# i-dot-ai-utilities structured logger, shared across the process
+# i-dot-ai-utilities structured logger.
 # ---------------------------------------------------------------------------
 LOGGER = StructuredLogger(
     level="INFO",
@@ -32,8 +41,8 @@ LOGGER = StructuredLogger(
     },
 )
 
-# The middleware's settings-loader no longer accepts a dotted import string
-# (security hardening in 0.6.0). Pass the logger object directly.
+# As of i-dot-ai-utilities 0.6.0, dotted-import strings are rejected by the
+# middleware's settings loader. Pass the fully-constructed logger object.
 I_DOT_AI_LOGGER = LOGGER
 
 I_DOT_AI_LOGGING_HEADER_ALLOWLIST = ("X-Tenant-ID", "X-Request-ID")
@@ -41,11 +50,21 @@ I_DOT_AI_LOGGING_HEADER_ALLOWLIST = ("X-Tenant-ID", "X-Request-ID")
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    # Our demo app is an AppConfig so that ready() runs OTel setup.
+    "demo.apps.DemoConfig",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "i_dot_ai_utilities.logging.middleware.django.StructuredLoggingMiddleware",
+    # DjangoInstrumentor (installed by configure_otel_for_django) prepends
+    # its own server-span middleware at the front of the chain; we do NOT
+    # list it here.
+    "i_dot_ai_utilities.logging.middleware.django_otel.StructuredLoggingMiddlewareOTel",
+    # Bind user.id onto the log context after auth runs. In this demo
+    # Django's AuthenticationMiddleware isn't wired (no sessions, no DB),
+    # so request.user is absent and the middleware is a no-op; the
+    # ordering is documented here so production consumers copy it.
+    "i_dot_ai_utilities.logging.middleware.django_user_id.DjangoUserIdMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
 
@@ -57,8 +76,6 @@ DATABASES: dict = {}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 
-# Silence Django's own stdlib logging to keep the stream clean of anything
-# that isn't our structured JSON.
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": True,

@@ -11,36 +11,11 @@ from i_dot_ai_utilities.logging.structured_logger import (
     _claim_request_scope,
     _release_request_scope,
 )
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
-from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
-
-# Optional Django imports for the scope-ownership-with-enricher test. These
-# are pytest-skipped when Django is unavailable, matching the middleware
-# test-suite's pattern.
-django = pytest.importorskip("django")
-
-from django.conf import settings as django_settings  # type: ignore[import-untyped]  # noqa: E402
-
-if not django_settings.configured:
-    django_settings.configure(
-        DEBUG=False,
-        ALLOWED_HOSTS=["*"],
-        DATABASES={},
-        INSTALLED_APPS=[],
-        MIDDLEWARE=[],
-        ROOT_URLCONF=__name__,
-        SECRET_KEY="test-secret-not-for-production",
-        USE_TZ=True,
-    )
-    django.setup()
-
-from django.test import RequestFactory  # type: ignore[import-untyped]  # noqa: E402
-
-from i_dot_ai_utilities.logging.types.enrichment_types import (  # noqa: E402
+from i_dot_ai_utilities.logging.types.enrichment_types import (
     ContextEnrichmentType,
+    ExecutionEnvironmentType,
 )
-
-urlpatterns: list = []
+from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
 
 
 def test_simple_logger(capsys):
@@ -285,10 +260,30 @@ class TestRefreshContextScopeOwnership:
         should still be applied on top of the existing context so callers
         that wanted to add fields aren't silently dropped.
 
-        Uses a real ``HttpRequest`` so the strict isinstance check in the
-        Django enricher (security finding A1) accepts it.
+        Uses a minimal FastAPI-shaped request object — the FastAPI
+        enricher validates structural conformance to ``RequestLike`` via
+        a runtime-checkable Protocol.
         """
-        request = RequestFactory().get("/x")
+        from starlette.datastructures import URL, Headers  # noqa: PLC0415
+        from starlette.requests import Request  # noqa: PLC0415
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/x",
+            "raw_path": b"/x",
+            "query_string": b"",
+            "headers": Headers({"host": "testserver"}).raw,
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 12345),
+            "http_version": "1.1",
+            "root_path": "",
+        }
+        request = Request(scope)
+        # Sanity: make sure the enricher's expected surface is present.
+        assert request.method == "GET"
+        assert isinstance(request.url, URL)
 
         logger = StructuredLogger(options={"execution_environment": ExecutionEnvironmentType.LOCAL})
         logger.set_context_field("keep_me", "from-middleware")
@@ -298,7 +293,7 @@ class TestRefreshContextScopeOwnership:
             logger.refresh_context(
                 context_enrichers=[
                     {
-                        "type": ContextEnrichmentType.DJANGO,
+                        "type": ContextEnrichmentType.FASTAPI,
                         "object": request,
                     }
                 ],
@@ -311,5 +306,6 @@ class TestRefreshContextScopeOwnership:
         line = parsed[-1]
         # Pre-existing field survived the skipped clear.
         assert line.get("keep_me") == "from-middleware"
-        # Enricher-sourced field was still applied.
-        assert line.get("http.request.method") == "GET"
+        # Enricher-sourced field was still applied. FastApiEnricher
+        # nests its output under ``request`` per the existing schema.
+        assert line.get("request", {}).get("method") == "GET"

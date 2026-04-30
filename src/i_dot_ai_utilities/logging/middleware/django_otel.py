@@ -1,16 +1,12 @@
-"""Django ``StructuredLoggingMiddlewareOTel`` — OTel-backed alternative.
+"""Django ``StructuredLoggingMiddlewareOTel`` — the library's Django middleware.
 
-Side-by-side replacement for
-:class:`i_dot_ai_utilities.logging.middleware.django.StructuredLoggingMiddleware`.
-Where the original middleware both *extracts* HTTP context (via
-``DjangoEnricher``) and *emits* it on every log line, this variant
-delegates HTTP-context extraction to the OpenTelemetry Django
+Delegates HTTP-context extraction to OpenTelemetry's Django
 auto-instrumentation: ``DjangoInstrumentor`` creates a server span per
 request whose attributes carry ``http.request.method``, ``url.path``,
 ``http.route``, ``http.response.status_code`` etc.
 
-The middleware therefore keeps only the *log-lifecycle* concerns that
-cannot live on a span:
+The middleware keeps only the *log-lifecycle* concerns that cannot live
+on a span:
 
 - ``request_started`` / ``request_completed`` / ``request_failed`` events.
 - ``duration_ms`` timing.
@@ -31,27 +27,21 @@ Trace correlation on log records comes from the
 active span on every event — **not** from the middleware. Consumers MUST
 call :func:`configure_otel_for_django` (or wire the processor into their
 own structlog chain) for ``trace_id`` / ``span_id`` / ``trace_flags`` to
-appear on log lines.
+appear on log lines. The middleware emits a loud one-shot WARNING at
+startup when it detects that no SDK ``TracerProvider`` has been
+installed, so forgetting the setup step is visible immediately rather
+than showing up as a silent absence of trace correlation.
 
-Behaviour differences vs ``StructuredLoggingMiddleware`` worth naming
-explicitly (and called out in the module README):
-
-- HTTP fields (``http.request.method`` / ``url.path`` / ``url.query`` /
-  ``server.address`` / ``user_agent.original`` / ``client.address`` /
-  ``http.request.header.x_forwarded_for`` / ``http.route`` /
-  ``django.url_name`` / ``user.id``) **do not** appear on the log
-  record. They live on the OTel span.
-- ``amzn_trace_root`` log field is dropped; trace context comes from the
-  OTel span via the structlog processor.
-- ``trace_id_source`` provenance marker is dropped — presence of a span
-  context conveys the same information implicitly.
-- ``user.id`` extraction is dropped entirely — no
-  ``SimpleLazyObject`` / ``FI-5`` handling. Consumers who need
-  ``user.id`` on logs must bind it explicitly from a view or a
-  separate thin middleware.
+``user.id`` is **not** extracted by this middleware. Consumers who need
+authenticated-user attribution on log records should add
+:class:`i_dot_ai_utilities.logging.middleware.django_user_id.DjangoUserIdMiddleware`
+to ``settings.MIDDLEWARE`` after ``AuthenticationMiddleware`` and this
+middleware. That middleware preserves the hardening (no DB query on
+unhydrated ``SimpleLazyObject``, database-error WARNINGs) without
+reintroducing HTTP-context extraction.
 
 Sync-only, thread-safe under Gunicorn sync / gthread workers via
-``structlog.contextvars``, identical to the original middleware.
+``structlog.contextvars``.
 """
 
 from __future__ import annotations
@@ -78,6 +68,7 @@ from i_dot_ai_utilities.logging.middleware._headers import (
     FORBIDDEN_HEADER_NAMES,
     MAX_HEADER_VALUE,
     X_REQUEST_ID,
+    validate_request_id,
 )
 from i_dot_ai_utilities.logging.middleware._levels import (
     LEVEL_ERROR,
@@ -94,7 +85,6 @@ from i_dot_ai_utilities.logging.middleware._settings import (
     SETTING_LOGGER,
     resolve_logger,
 )
-from i_dot_ai_utilities.logging.middleware._trace import validate_request_id
 from i_dot_ai_utilities.logging.structured_logger import (
     REQUEST_SCOPE_OWNER_MIDDLEWARE,
     _claim_request_scope,
@@ -114,6 +104,9 @@ _EVENT_FAILED = "request_failed"
 _EVENT_STARTUP = "structured_logging_middleware_otel_active"
 _EVENT_FORBIDDEN_HEADERS_REJECTED = (
     "structured_logging_middleware_otel_forbidden_headers_rejected"
+)
+_EVENT_TRACER_PROVIDER_MISSING = (
+    "structured_logging_middleware_otel_tracer_provider_missing"
 )
 
 # Synthesised statuses when a view raises.
@@ -171,6 +164,14 @@ class StructuredLoggingMiddlewareOTel:
 
         if rejected:
             self._emit_forbidden_headers_warning(rejected)
+
+        # Loudly complain if the caller has not wired OpenTelemetry up at
+        # process startup. Without a real SDK TracerProvider no spans are
+        # produced and the ``otel_trace_context_processor`` has nothing to
+        # inject — the middleware still works but trace correlation is
+        # silently absent. The warning names the remediation so operators
+        # don't have to grep docs to recover.
+        self._warn_if_tracer_provider_missing()
 
     @staticmethod
     def _build_exclusions(
@@ -260,6 +261,60 @@ class StructuredLoggingMiddlewareOTel:
         except Exception as exc:  # noqa: BLE001 - last-resort observability
             print(  # noqa: T201
                 f"i_dot_ai_utilities: forbidden-header warning failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+
+    def _warn_if_tracer_provider_missing(self) -> None:
+        """Emit a one-shot WARNING if no SDK ``TracerProvider`` is installed.
+
+        OpenTelemetry's API exposes a default ``ProxyTracerProvider`` when
+        no real provider has been registered. Any spans the middleware
+        relies on (and any ``trace_id`` / ``span_id`` the structlog
+        processor would otherwise inject) are no-ops in that state.
+
+        We check for a genuine SDK provider by isinstance rather than
+        identity so subclasses (including test providers and vendor
+        providers) are all accepted. A mis-configured process therefore
+        gets one loud, named event at worker startup pointing operators
+        straight at ``configure_otel_for_django`` as the fix. The check
+        is tolerant: anything unexpected during the probe (including
+        import errors in exotic test environments) is swallowed so
+        middleware init never fails because of observability scaffolding.
+        """
+        try:
+            from opentelemetry import trace  # noqa: PLC0415
+            from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
+
+            provider = trace.get_tracer_provider()
+            if isinstance(provider, TracerProvider):
+                return
+
+            try:
+                self._logger.warning(
+                    _EVENT_TRACER_PROVIDER_MISSING,
+                    actual_provider=type(provider).__name__,
+                    logging_schema_version=_SCHEMA_VERSION,
+                    remediation=(
+                        "call i_dot_ai_utilities.logging._otel."
+                        "configure_otel_for_django(service_name=...) at "
+                        "process startup (wsgi.py / asgi.py / "
+                        "AppConfig.ready())"
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 - last-resort observability
+                print(  # noqa: T201
+                    (
+                        f"i_dot_ai_utilities: tracer-provider-missing warning "
+                        f"failed: {type(exc).__name__}: {exc}"
+                    ),
+                    file=sys.stderr,
+                )
+        except Exception as exc:  # noqa: BLE001 - probe must never crash init
+            print(  # noqa: T201
+                (
+                    f"i_dot_ai_utilities: tracer-provider probe failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
                 file=sys.stderr,
             )
 

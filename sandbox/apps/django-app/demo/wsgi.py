@@ -1,4 +1,4 @@
-"""WSGI entrypoint for the sandbox Django demo."""
+"""WSGI entrypoint for the OTel-middleware Django demo."""
 
 import os
 

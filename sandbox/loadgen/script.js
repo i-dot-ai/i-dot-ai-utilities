@@ -1,11 +1,10 @@
 // k6 load generator for the i-dot-ai-utilities logging sandbox.
 //
-// Hits three targets with a weighted mix of endpoints so the log stream
+// Hits two targets with a weighted mix of endpoints so the log stream
 // contains a realistic blend of info / warning / error messages:
 //
-//   - FastAPI demo             (:8001) - ContextEnrichmentType.FASTAPI
-//   - Django demo              (:8002) - StructuredLoggingMiddleware
-//   - Django + OTel middleware (:8003) - StructuredLoggingMiddlewareOTel
+//   - FastAPI demo (:8001) - ContextEnrichmentType.FASTAPI
+//   - Django demo  (:8003) - StructuredLoggingMiddlewareOTel + DjangoUserIdMiddleware
 //
 // Parametrised via env vars so the same script drives the automated compose
 // run and ad-hoc manual runs (see sandbox/README.md for examples).
@@ -18,16 +17,14 @@ export const options = {
     duration: __ENV.K6_DURATION || '5m',
 };
 
-const FASTAPI     = __ENV.FASTAPI_URL     || 'http://fastapi-app:8001';
-const DJANGO      = __ENV.DJANGO_URL      || 'http://django-app:8002';
-const DJANGO_OTEL = __ENV.DJANGO_OTEL_URL || 'http://django-otel-app:8003';
+const FASTAPI = __ENV.FASTAPI_URL || 'http://fastapi-app:8001';
+const DJANGO  = __ENV.DJANGO_URL  || 'http://django-app:8003';
 
 // A target is (base_url, is_django) so URL normalisation can add trailing
 // slashes only where Django expects them.
 const TARGETS = [
-    { url: FASTAPI,     django: false, tag: 'fastapi'     },
-    { url: DJANGO,      django: true,  tag: 'django'      },
-    { url: DJANGO_OTEL, django: true,  tag: 'django-otel' },
+    { url: FASTAPI, django: false, tag: 'fastapi' },
+    { url: DJANGO,  django: true,  tag: 'django'  },
 ];
 
 // Return a random hex string that is a valid W3C traceparent.
@@ -77,13 +74,13 @@ export default function () {
     };
 
     // Inject a traceparent on ~50% of requests so you can see header-based
-    // trace propagation working on both middlewares (the non-OTel middleware
-    // parses it directly; DjangoInstrumentor handles it on the OTel app).
+    // trace propagation working. The OTel Django middleware's composite
+    // propagator extracts and continues the trace.
     if (Math.random() < 0.5) {
         params.headers['traceparent'] = traceparent();
     }
 
-    // Exercise the header allowlist on both Django apps.
+    // Exercise the header allowlist on the Django app.
     if (target.django && Math.random() < 0.3) {
         params.headers['X-Tenant-ID'] = `tenant-${Math.floor(Math.random() * 5)}`;
     }

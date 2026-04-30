@@ -178,3 +178,98 @@ class TestConfigureOTelForDjango:
         tracer = provider.get_tracer(__name__)
         with tracer.start_as_current_span("probe"):
             pass
+
+
+class TestBuildResourceEnvVars:
+    """``_build_resource`` reads ``APP_VERSION`` and ``ENVIRONMENT`` from
+    the process environment and binds them as OTel resource attributes.
+
+    These branches are easy to break and drive production observability
+    — ``service.version`` gates vendor-side "version compare" views and
+    ``deployment.environment`` is the primary filter across every
+    Grafana / Tempo dashboard. We pin the behaviour directly here rather
+    than only through integration coverage.
+    """
+
+    def _resource_attrs(self, provider: TracerProvider) -> dict:
+        """Return the provider's Resource attributes as a plain dict.
+
+        The Resource API exposes a read-only mapping; converting makes
+        the ``in`` / ``not in`` assertions below concise.
+        """
+        return dict(provider.resource.attributes)
+
+    def test_app_version_env_var_becomes_service_version(self, monkeypatch):
+        monkeypatch.setenv("APP_VERSION", "1.2.3")
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+        provider = configure_otel_for_django(
+            service_name="svc",
+            span_exporter=InMemorySpanExporter(),
+            install_global_propagator=False,
+        )
+        attrs = self._resource_attrs(provider)
+        assert attrs.get("service.version") == "1.2.3"
+        assert attrs.get("service.name") == "svc"
+
+    def test_environment_env_var_becomes_deployment_environment(self, monkeypatch):
+        monkeypatch.delenv("APP_VERSION", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "prod")
+
+        provider = configure_otel_for_django(
+            service_name="svc",
+            span_exporter=InMemorySpanExporter(),
+            install_global_propagator=False,
+        )
+        attrs = self._resource_attrs(provider)
+        assert attrs.get("deployment.environment") == "prod"
+
+    def test_both_env_vars_bound_when_set(self, monkeypatch):
+        monkeypatch.setenv("APP_VERSION", "4.5.6")
+        monkeypatch.setenv("ENVIRONMENT", "staging")
+
+        provider = configure_otel_for_django(
+            service_name="svc",
+            span_exporter=InMemorySpanExporter(),
+            install_global_propagator=False,
+        )
+        attrs = self._resource_attrs(provider)
+        assert attrs.get("service.version") == "4.5.6"
+        assert attrs.get("deployment.environment") == "staging"
+
+    def test_missing_env_vars_omit_attributes_rather_than_binding_empty(
+        self, monkeypatch
+    ):
+        """Absent env vars MUST NOT be bound as empty-string attributes —
+        downstream queries doing ``deployment.environment != ""`` would
+        produce false positives. ``_build_resource`` explicitly checks
+        truthiness before binding.
+        """
+        monkeypatch.delenv("APP_VERSION", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+        provider = configure_otel_for_django(
+            service_name="svc",
+            span_exporter=InMemorySpanExporter(),
+            install_global_propagator=False,
+        )
+        attrs = self._resource_attrs(provider)
+        assert "service.version" not in attrs
+        assert "deployment.environment" not in attrs
+
+    def test_empty_string_env_vars_are_treated_as_unset(self, monkeypatch):
+        """``os.environ["APP_VERSION"] = ""`` should NOT produce
+        ``service.version=""``. The helper uses ``if version:`` which
+        treats empty strings as falsy, same for ``ENVIRONMENT``.
+        """
+        monkeypatch.setenv("APP_VERSION", "")
+        monkeypatch.setenv("ENVIRONMENT", "")
+
+        provider = configure_otel_for_django(
+            service_name="svc",
+            span_exporter=InMemorySpanExporter(),
+            install_global_propagator=False,
+        )
+        attrs = self._resource_attrs(provider)
+        assert "service.version" not in attrs
+        assert "deployment.environment" not in attrs

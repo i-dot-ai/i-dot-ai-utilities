@@ -33,7 +33,7 @@ class DemoConfig(AppConfig):
         # and auto-instrument Django so per-request server spans carry the
         # http.request.method / url.path / http.route / etc. attributes.
         configure_otel_for_django(
-            service_name="django-otel-demo",
+            service_name="django-demo",
             # OTLP over HTTP to the LGTM all-in-one image's Tempo ingest.
             span_exporter=OTLPSpanExporter(
                 endpoint="http://lgtm:4318/v1/traces",

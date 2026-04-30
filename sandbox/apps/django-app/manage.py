@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Django's command-line utility."""
+"""Django's command-line utility for the OTel-middleware demo app."""
 import os
 import sys
 

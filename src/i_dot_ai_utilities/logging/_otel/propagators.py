@@ -2,14 +2,13 @@
 
 Builds a :class:`CompositePropagator` chaining W3C Trace Context and AWS
 X-Ray, arranged so W3C wins when both headers are present on the same
-inbound request. Matches the existing ``middleware/_trace.py``
-precedence ladder.
+inbound request. Mirrors the precedence historically enforced by the
+library's own header-parsing path, now delegated entirely to OTel.
 
 ``X-Request-ID`` is intentionally **not** included in the propagator
-chain. The existing middleware treats it as an opaque per-hop
-correlation id (never as a W3C trace), and the OTel alternative
-preserves that contract — ``request_id`` continues to be bound onto the
-log context by the middleware itself, not by span context.
+chain. The middleware treats it as an opaque per-hop correlation id
+(never as a W3C trace): ``request_id`` is bound onto the log context by
+the middleware itself, not by span context.
 
 Pure wiring module: no module-level side effects, no global propagator
 mutation. ``set_global_textmap`` is called exclusively from

@@ -24,7 +24,6 @@ from i_dot_ai_utilities.logging.types.logger_config_options import LoggerConfigO
 
 if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.base_context import BaseContext
-    from i_dot_ai_utilities.logging.types.django_enrichment_schema import ExtractedDjangoContext
     from i_dot_ai_utilities.logging.types.fastapi_enrichment_schema import ExtractedFastApiContext
     from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import ExtractedLambdaContext
 
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
 # Request-scope ownership
 # ---------------------------------------------------------------------------
 #
-# When a framework integration (e.g. ``StructuredLoggingMiddleware``) owns the
+# When a framework integration (e.g. ``StructuredLoggingMiddlewareOTel``) owns the
 # lifecycle of the structured-log context for the duration of a request, it
 # sets this contextvar with a sentinel token before rebuilding the context and
 # clears it in ``finally``. Inside that window, manual ``refresh_context``
@@ -225,7 +224,7 @@ class StructuredLogger:
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
         :param scope: The scope of the refresh. Callers inside a framework
             integration that already owns the request's log-context lifecycle
-            (e.g. Django's ``StructuredLoggingMiddleware``) should be treated
+            (e.g. Django's ``StructuredLoggingMiddlewareOTel``) should be treated
             as no-ops to avoid silent de-correlation of audit trails
             (security finding: residual flaw). Pass ``"job"`` for background
             workers that legitimately need to reset per-job context regardless
@@ -265,7 +264,7 @@ class StructuredLogger:
 
     def _apply_enrichers(self, context_enrichers: list[ContextEnrichmentOptions]) -> None:
         additional_context: (
-            ExtractedFastApiContext | ExtractedLambdaContext | ExtractedDjangoContext | dict[str, Any]
+            ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any]
         ) = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]

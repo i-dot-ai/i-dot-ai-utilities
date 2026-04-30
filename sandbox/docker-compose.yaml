@@ -2,11 +2,11 @@
 #
 # Services:
 #   fastapi-app      - FastAPI demo, exercises ContextEnrichmentType.FASTAPI
-#   django-app       - Django demo, uses StructuredLoggingMiddleware (structlog-native)
-#   django-otel-app  - Django demo, uses StructuredLoggingMiddlewareOTel (OTel-backed)
+#   django-app       - Django demo, uses StructuredLoggingMiddlewareOTel
+#                      + DjangoUserIdMiddleware
 #   otelcol          - OTel Collector Contrib; tails docker json-file logs
 #   lgtm             - grafana/otel-lgtm all-in-one (Loki/Tempo/Mimir/Grafana)
-#   k6               - generates continuous traffic against the three apps
+#   k6               - generates continuous traffic against the two apps
 #
 # Running:
 #   docker compose up --build
@@ -43,32 +43,11 @@ services:
     image: sandbox-django-app:local
     container_name: sandbox-django-app
     ports:
-      - "8002:8002"
-    volumes:
-      - ../:/opt/utility:ro
-    environment:
-      APP_NAME: django-demo
-      REPO: i-dot-ai-utilities-sandbox
-      ENVIRONMENT: sandbox
-      DJANGO_SETTINGS_MODULE: demo.settings
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "django-app"
-
-  django-otel-app:
-    build:
-      context: ./apps/django-otel-app
-    image: sandbox-django-otel-app:local
-    container_name: sandbox-django-otel-app
-    ports:
       - "8003:8003"
     volumes:
       - ../:/opt/utility:ro
     environment:
-      APP_NAME: django-otel-demo
+      APP_NAME: django-demo
       REPO: i-dot-ai-utilities-sandbox
       ENVIRONMENT: sandbox
       DJANGO_SETTINGS_MODULE: demo.settings
@@ -83,7 +62,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        tag: "django-otel-app"
+        tag: "django-app"
 
   lgtm:
     image: grafana/otel-lgtm:latest
@@ -118,8 +97,7 @@ services:
       - ./loadgen:/scripts:ro
     environment:
       FASTAPI_URL: http://fastapi-app:8001
-      DJANGO_URL: http://django-app:8002
-      DJANGO_OTEL_URL: http://django-otel-app:8003
+      DJANGO_URL: http://django-app:8003
       # Override these at `docker compose run` time to shorten / lengthen
       # a load run without editing the script.
       K6_DURATION: "5m"
@@ -128,7 +106,5 @@ services:
       fastapi-app:
         condition: service_started
       django-app:
-        condition: service_started
-      django-otel-app:
         condition: service_started
     restart: "no"
