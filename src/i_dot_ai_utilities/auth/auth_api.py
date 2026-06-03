@@ -1,6 +1,9 @@
-import requests
-from pydantic import BaseModel
+from typing import Any
 
+import requests
+from pydantic import BaseModel, field_validator
+
+from i_dot_ai_utilities.auth.auth_reason import AuthReason
 from i_dot_ai_utilities.auth.exceptions import AuthApiRequestError
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
@@ -12,7 +15,15 @@ class AuthApiResponseMetadata(BaseModel):
 
 class AuthApiResponseDecision(BaseModel):
     is_authorised: bool
-    auth_reason: str
+    auth_reason: AuthReason
+
+    @field_validator("auth_reason", mode="before")
+    @classmethod
+    def coerce_auth_reason(cls, raw_reason: Any) -> AuthReason:
+        try:
+            return AuthReason(raw_reason)
+        except ValueError:
+            return AuthReason.UNKNOWN
 
 
 class AuthApiResponse(BaseModel):
@@ -23,7 +34,7 @@ class AuthApiResponse(BaseModel):
 class UserAuthorisationResult(BaseModel):
     email: str
     is_authorised: bool
-    auth_reason: str
+    auth_reason: AuthReason
 
 
 class AuthApiClient:
