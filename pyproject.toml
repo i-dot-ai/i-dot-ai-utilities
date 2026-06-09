@@ -40,7 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 # Development dependencies
 dev = [
-    "pytest>=8.3.5",
+    "pytest>=9.0.3",
     "pytest-cov>=6.1.1",
     "ruff>=0.12.2",
     "mypy>=1.15.0",
@@ -48,7 +48,7 @@ dev = [
 
 # Auth module - Adds HTTP request capabilities
 auth = [
-    "requests>=2.32.3",
+    "requests>=2.33.0",
 ]
 
 # File store module - Adds cloud storage support (AWS S3, Azure Blob, GCP Cloud Storage, MinIO)
@@ -64,8 +64,8 @@ file_store = [
 
 # LiteLLM module - Adds LLM integration capabilities
 litellm = [
-    "litellm==1.79.0",
-    "requests>=2.32.3",
+    "litellm>=1.83.7,<2.0.0",
+    "requests>=2.33.0",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
     "langfuse>=3.4.0",
@@ -82,8 +82,8 @@ all = [
     "boto3>=1.40.41",
     "boto3-stubs[s3]>=1.40.41",
     "minio>=7.2.15",
-    "litellm>=1.77.1",
-    "requests>=2.32.3",
+    "litellm>=1.83.7,<2.0.0",
+    "requests>=2.33.0",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
     "langfuse>=3.4.0",
@@ -181,7 +181,7 @@ dev = [
     "bandit>=1.8.3",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
-    "pytest>=8.3.5",
+    "pytest>=9.0.3",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
