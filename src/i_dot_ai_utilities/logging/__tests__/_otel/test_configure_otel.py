@@ -9,7 +9,11 @@ pytest.importorskip("opentelemetry")
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from i_dot_ai_utilities.logging._otel.setup import configure_otel, _reset_for_tests
+from i_dot_ai_utilities.logging._otel.setup import (
+    configure_otel,
+    _otlp_exporter_kwargs,
+    _reset_for_tests,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -53,3 +57,49 @@ class TestConfigureOTel:
                 enable_metrics=False,
                 enable_log_bridge=False,
             )
+
+
+class TestOtlpExporterKwargs:
+    """All three signals must share endpoint and header handling.
+
+    Regression guard: headers were previously applied to traces only, so an
+    authenticated collector would accept spans but reject logs and metrics.
+    """
+
+    SIGNALS = ("/v1/traces", "/v1/metrics", "/v1/logs")
+
+    def test_returns_none_without_endpoint(self, monkeypatch):
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        for signal in self.SIGNALS:
+            assert _otlp_exporter_kwargs(signal) is None
+
+    def test_all_signals_receive_parsed_headers(self, monkeypatch):
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+        monkeypatch.setenv(
+            "OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer tkn, x-tenant=iai"
+        )
+        for signal in self.SIGNALS:
+            kwargs = _otlp_exporter_kwargs(signal)
+            assert kwargs["endpoint"] == f"http://collector:4318{signal}"
+            assert kwargs["headers"] == {
+                "Authorization": "Bearer tkn",
+                "x-tenant": "iai",
+            }
+
+    def test_headers_omitted_when_env_unset(self, monkeypatch):
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_HEADERS", raising=False)
+        for signal in self.SIGNALS:
+            assert "headers" not in _otlp_exporter_kwargs(signal)
+
+    def test_endpoint_suffix_is_not_duplicated(self, monkeypatch):
+        monkeypatch.setenv(
+            "OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/v1/traces"
+        )
+        kwargs = _otlp_exporter_kwargs("/v1/traces")
+        assert kwargs["endpoint"] == "http://collector:4318/v1/traces"
+
+    def test_trailing_slash_endpoint_is_normalised(self, monkeypatch):
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/")
+        kwargs = _otlp_exporter_kwargs("/v1/logs")
+        assert kwargs["endpoint"] == "http://collector:4318/v1/logs"

@@ -84,21 +84,34 @@ def _build_id_generator() -> Any | None:
     return None
 
 
-def _default_otlp_span_exporter() -> SpanExporter | None:
-    """Build an OTLP HTTP span exporter from env, or None if unset."""
+def _otlp_exporter_kwargs(signal_path: str) -> dict[str, Any] | None:
+    """Build shared OTLP HTTP exporter kwargs for one signal.
+
+    Single source of truth for endpoint suffixing and header propagation so
+    traces, metrics, and logs cannot drift apart (e.g. authenticated traces
+    but unauthenticated logs/metrics).
+    """
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:
+        return None
+    signal_endpoint = endpoint.rstrip("/")
+    if not signal_endpoint.endswith(signal_path):
+        signal_endpoint = f"{signal_endpoint}{signal_path}"
+    kwargs: dict[str, Any] = {"endpoint": signal_endpoint}
+    headers = _otlp_headers_from_env()
+    if headers:
+        kwargs["headers"] = headers
+    return kwargs
+
+
+def _default_otlp_span_exporter() -> SpanExporter | None:
+    """Build an OTLP HTTP span exporter from env, or None if unset."""
+    kwargs = _otlp_exporter_kwargs("/v1/traces")
+    if kwargs is None:
         return None
     with contextlib.suppress(ImportError):
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-        traces_endpoint = endpoint.rstrip("/")
-        if not traces_endpoint.endswith("/v1/traces"):
-            traces_endpoint = f"{traces_endpoint}/v1/traces"
-        headers = _otlp_headers_from_env()
-        kwargs: dict[str, Any] = {"endpoint": traces_endpoint}
-        if headers:
-            kwargs["headers"] = headers
         return OTLPSpanExporter(**kwargs)
     return None
 
@@ -129,19 +142,16 @@ def _require_otlp_endpoint_or_raise() -> None:
 
 def _configure_metrics(resource: Resource) -> None:
     """Install a MeterProvider with OTLP export when the exporter is available."""
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not endpoint:
+    kwargs = _otlp_exporter_kwargs("/v1/metrics")
+    if kwargs is None:
         return
     with contextlib.suppress(Exception):
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-        metrics_endpoint = endpoint.rstrip("/")
-        if not metrics_endpoint.endswith("/v1/metrics"):
-            metrics_endpoint = f"{metrics_endpoint}/v1/metrics"
         reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=metrics_endpoint),
+            OTLPMetricExporter(**kwargs),
             export_interval_millis=10000,
         )
         provider = MeterProvider(resource=resource, metric_readers=[reader])
@@ -150,8 +160,8 @@ def _configure_metrics(resource: Resource) -> None:
 
 def _configure_logs_bridge(resource: Resource) -> None:
     """Install LoggerProvider + OTLP exporter so structlog can emit OTLP logs."""
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not endpoint:
+    kwargs = _otlp_exporter_kwargs("/v1/logs")
+    if kwargs is None:
         return
     try:
         import logging
@@ -161,12 +171,9 @@ def _configure_logs_bridge(resource: Resource) -> None:
         from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
-        logs_endpoint = endpoint.rstrip("/")
-        if not logs_endpoint.endswith("/v1/logs"):
-            logs_endpoint = f"{logs_endpoint}/v1/logs"
         provider = LoggerProvider(resource=resource)
         provider.add_log_record_processor(
-            BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint))
+            BatchLogRecordProcessor(OTLPLogExporter(**kwargs))
         )
         set_logger_provider(provider)
         # Stdlib bridge for code paths that use logging.getLogger().

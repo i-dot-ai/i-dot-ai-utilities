@@ -213,7 +213,7 @@ configure_otel_for_django(
 |:---|:---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector HTTP base (e.g. `http://nlb:4318`) |
 | `OTEL_REQUIRE_ENDPOINT` | Set `1` so missing endpoint raises (no silent console export) |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` (bearer: `Authorization=Bearer …`) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` (bearer: `Authorization=Bearer …`). Applied to the trace, metric, and log exporters alike |
 
 After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. For Lambda/Batch use `configure_otel_for_lambda` and `force_flush_otel()` before exit.
 
