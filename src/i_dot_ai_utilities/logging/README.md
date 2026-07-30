@@ -207,6 +207,16 @@ configure_otel_for_django(
 )
 ```
 
+**AWS / Phase 2 environment variables**
+
+| Variable | Purpose |
+|:---|:---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector HTTP base (e.g. `http://nlb:4318`) |
+| `OTEL_REQUIRE_ENDPOINT` | Set `1` so missing endpoint raises (no silent console export) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` (bearer: `Authorization=Bearer …`) |
+
+After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. For Lambda/Batch use `configure_otel_for_lambda` and `force_flush_otel()` before exit.
+
 If you forget to call `configure_otel_for_django` at startup, `StructuredLoggingMiddlewareOTel` emits a loud one-shot WARNING at worker boot (`structured_logging_middleware_otel_tracer_provider_missing`) pointing straight at the fix — so the degraded "no trace ids on logs" state is visible immediately rather than showing up as silent absence.
 
 **Wire into `settings.MIDDLEWARE`** — place after `SecurityMiddleware` and `AuthenticationMiddleware`, but before application-specific middleware so timing and logging wrap as much of the request lifecycle as possible:

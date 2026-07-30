@@ -2,7 +2,9 @@
 
 Public entry points:
 
-- :func:`configure_otel_for_django` — one-call setup for Django services.
+- :func:`configure_otel` — framework-neutral bootstrap (traces/metrics/logs).
+- :func:`configure_otel_for_django` — Django auto-instrumentation wrapper.
+- :func:`configure_otel_for_fastapi` — FastAPI/ASGI auto-instrumentation wrapper.
 - :func:`otel_trace_context_processor` — structlog processor injecting
   ``trace_id`` / ``span_id`` / ``trace_flags`` from the active span.
 - :func:`build_composite_propagator` — W3C + AWS X-Ray composite textmap.
@@ -17,7 +19,12 @@ from __future__ import annotations
 
 from i_dot_ai_utilities.logging._otel.propagators import build_composite_propagator
 from i_dot_ai_utilities.logging._otel.setup import (
+    configure_otel,
     configure_otel_for_django,
+    configure_otel_for_fastapi,
+    configure_otel_for_lambda,
+    ensure_structlog_otel_processors,
+    force_flush_otel,
     insert_trace_processor,
 )
 from i_dot_ai_utilities.logging._otel.structlog_processor import (
@@ -26,7 +33,12 @@ from i_dot_ai_utilities.logging._otel.structlog_processor import (
 
 __all__ = [
     "build_composite_propagator",
+    "configure_otel",
     "configure_otel_for_django",
+    "configure_otel_for_fastapi",
+    "configure_otel_for_lambda",
+    "ensure_structlog_otel_processors",
+    "force_flush_otel",
     "insert_trace_processor",
     "otel_trace_context_processor",
 ]
