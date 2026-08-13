@@ -1,0 +1,99 @@
+# OTel Collector Contrib config.
+#
+# Pipeline:
+#   filelog (tails Docker json-file logs on host)
+#     -> docker envelope JSON parser (unwraps {"log":"...","time":"..."})
+#     -> structlog JSON parser on the inner `log` field (when present)
+#     -> severity + time parsers
+#     -> OTLP gRPC export to the LGTM all-in-one image.
+#
+# Note: we capture logs from ALL containers and rely on filtering/labelling in
+# Grafana. We add a `container_id` attribute derived from the file path so
+# operators can discriminate per-service in LogQL.
+
+receivers:
+  filelog:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    include_file_path: true
+    start_at: end
+    operators:
+      # 1. Parse the outer Docker log envelope:
+      #    {"log":"<actual line>\n","stream":"stdout","time":"2025-..."}
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.time
+          layout: "%Y-%m-%dT%H:%M:%S.%LZ"
+
+      # 2. Extract container id from the file path.
+      - type: regex_parser
+        parse_from: attributes["log.file.path"]
+        regex: "containers/(?P<container_id>[a-f0-9]{12,64})/"
+
+      # 3. Only keep stdout; drop stderr from this pipeline.
+      - type: filter
+        expr: 'attributes.stream != "stdout"'
+
+      # 4. Try to parse the inner payload as JSON. Unparseable lines pass
+      #    through untouched (body stays as the raw log line).
+      - type: json_parser
+        parse_from: attributes.log
+        parse_to: attributes
+        if: 'attributes.log matches "^\\{"'
+
+      # 5. Map structlog level -> OTel severity (only if a level field exists).
+      - type: severity_parser
+        parse_from: attributes.level
+        if: 'attributes.level != nil'
+        mapping:
+          debug: debug
+          info: info
+          warn: warning
+          warning: warning
+          error: error
+          critical: fatal
+
+      # 6. Hoist the `message` field into the log body so Grafana's "Logs"
+      #    panel shows a useful one-liner by default.
+      - type: move
+        from: attributes.message
+        to: body
+        if: 'attributes.message != nil'
+
+processors:
+  # Promote attributes emitted by the logger onto the RESOURCE so Loki exposes
+  # them as stream labels (service.name etc). `resource.from_attribute` only
+  # reads resource attributes, so we do this via transform/logs instead.
+  transform/resource:
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["service.name"], attributes["logger_name"]) where attributes["logger_name"] != nil
+          - set(resource.attributes["deployment.environment"], attributes["env"]["environment_name"]) where attributes["env"] != nil
+
+  batch:
+    timeout: 2s
+    send_batch_size: 512
+
+exporters:
+  otlp/lgtm:
+    endpoint: lgtm:4317
+    tls:
+      insecure: true
+
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [transform/resource, batch]
+      exporters: [otlp/lgtm, debug]
