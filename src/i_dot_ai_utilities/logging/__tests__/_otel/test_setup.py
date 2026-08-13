@@ -44,6 +44,9 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (  # noqa: E4
     InMemorySpanExporter,
 )
 
+from i_dot_ai_utilities.logging._otel.otlp_log_processor import (  # noqa: E402
+    otel_otlp_log_emitter_processor,
+)
 from i_dot_ai_utilities.logging._otel.setup import (  # noqa: E402
     configure_otel_for_django,
     insert_trace_processor,
@@ -54,11 +57,11 @@ from i_dot_ai_utilities.logging._otel.structlog_processor import (  # noqa: E402
 
 
 class TestInsertTraceProcessor:
-    def test_empty_list_gets_processor_appended(self):
+    def test_empty_list_gets_processors_appended(self):
         result = insert_trace_processor([])
-        assert result == [otel_trace_context_processor]
+        assert result == [otel_trace_context_processor, otel_otlp_log_emitter_processor]
 
-    def test_processor_inserted_before_renderer(self):
+    def test_processors_inserted_before_renderer_in_order(self):
         # Simulate a structlog chain: merge_contextvars, add_log_level, JSONRenderer.
         def merge_contextvars(*_args, **_kwargs):
             return {}
@@ -72,10 +75,13 @@ class TestInsertTraceProcessor:
         chain = [merge_contextvars, add_log_level, json_renderer]
         result = insert_trace_processor(chain)
 
+        # Trace context precedes the log emitter so OTLP logs carry trace ids;
+        # both stay before the terminal renderer.
         assert result[0] is merge_contextvars
         assert result[1] is add_log_level
         assert result[2] is otel_trace_context_processor
-        assert result[3] is json_renderer
+        assert result[3] is otel_otlp_log_emitter_processor
+        assert result[4] is json_renderer
 
     def test_idempotent_when_processor_already_present(self):
         def _placeholder(*_args, **_kwargs):
@@ -113,9 +119,7 @@ class TestConfigureOTelForDjango:
         assert len(spans) == 1
         assert spans[0].name == "work"
 
-    def test_install_global_propagator_true_replaces_textmap(
-        self, tracer_provider_with_memory_exporter
-    ):
+    def test_install_global_propagator_true_replaces_textmap(self, tracer_provider_with_memory_exporter):
         configure_otel_for_django(
             service_name="svc",
             tracer_provider=tracer_provider_with_memory_exporter,
@@ -124,9 +128,7 @@ class TestConfigureOTelForDjango:
         textmap = get_global_textmap()
         assert isinstance(textmap, CompositePropagator)
 
-    def test_install_global_propagator_false_leaves_textmap_alone(
-        self, tracer_provider_with_memory_exporter
-    ):
+    def test_install_global_propagator_false_leaves_textmap_alone(self, tracer_provider_with_memory_exporter):
         before = get_global_textmap()
         configure_otel_for_django(
             service_name="svc",
@@ -136,9 +138,7 @@ class TestConfigureOTelForDjango:
         after = get_global_textmap()
         assert after is before
 
-    def test_structlog_processors_list_receives_trace_processor(
-        self, tracer_provider_with_memory_exporter
-    ):
+    def test_structlog_processors_list_receives_trace_processor(self, tracer_provider_with_memory_exporter):
         def _placeholder(*_args, **_kwargs):
             return "x"
 
@@ -151,9 +151,7 @@ class TestConfigureOTelForDjango:
         )
         assert otel_trace_context_processor in processors
 
-    def test_structlog_processors_none_is_fine(
-        self, tracer_provider_with_memory_exporter
-    ):
+    def test_structlog_processors_none_is_fine(self, tracer_provider_with_memory_exporter):
         # Should not raise.
         provider = configure_otel_for_django(
             service_name="svc",
@@ -184,9 +182,9 @@ class TestBuildResourceEnvVars:
     """``_build_resource`` reads ``APP_VERSION`` and ``ENVIRONMENT`` from
     the process environment and binds them as OTel resource attributes.
 
-    These branches are easy to break and drive production observability
-    — ``service.version`` gates vendor-side "version compare" views and
-    ``deployment.environment`` is the primary filter across every
+    These branches are easy to break and drive production observability:
+    ``service.version`` gates vendor-side "version compare" views and
+    ``deployment.environment.name`` is the primary filter across every
     Grafana / Tempo dashboard. We pin the behaviour directly here rather
     than only through integration coverage.
     """
@@ -222,7 +220,7 @@ class TestBuildResourceEnvVars:
             install_global_propagator=False,
         )
         attrs = self._resource_attrs(provider)
-        assert attrs.get("deployment.environment") == "prod"
+        assert attrs.get("deployment.environment.name") == "prod"
 
     def test_both_env_vars_bound_when_set(self, monkeypatch):
         monkeypatch.setenv("APP_VERSION", "4.5.6")
@@ -235,13 +233,11 @@ class TestBuildResourceEnvVars:
         )
         attrs = self._resource_attrs(provider)
         assert attrs.get("service.version") == "4.5.6"
-        assert attrs.get("deployment.environment") == "staging"
+        assert attrs.get("deployment.environment.name") == "staging"
 
-    def test_missing_env_vars_omit_attributes_rather_than_binding_empty(
-        self, monkeypatch
-    ):
+    def test_missing_env_vars_omit_attributes_rather_than_binding_empty(self, monkeypatch):
         """Absent env vars MUST NOT be bound as empty-string attributes —
-        downstream queries doing ``deployment.environment != ""`` would
+        downstream queries doing ``deployment.environment.name != ""`` would
         produce false positives. ``_build_resource`` explicitly checks
         truthiness before binding.
         """
@@ -255,7 +251,7 @@ class TestBuildResourceEnvVars:
         )
         attrs = self._resource_attrs(provider)
         assert "service.version" not in attrs
-        assert "deployment.environment" not in attrs
+        assert "deployment.environment.name" not in attrs
 
     def test_empty_string_env_vars_are_treated_as_unset(self, monkeypatch):
         """``os.environ["APP_VERSION"] = ""`` should NOT produce
@@ -272,4 +268,4 @@ class TestBuildResourceEnvVars:
         )
         attrs = self._resource_attrs(provider)
         assert "service.version" not in attrs
-        assert "deployment.environment" not in attrs
+        assert "deployment.environment.name" not in attrs

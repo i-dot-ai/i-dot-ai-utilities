@@ -263,9 +263,7 @@ class StructuredLogger:
         self._apply_enrichers(context_enrichers)
 
     def _apply_enrichers(self, context_enrichers: list[ContextEnrichmentOptions]) -> None:
-        additional_context: (
-            ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any]
-        ) = {}
+        additional_context: ExtractedFastApiContext | ExtractedLambdaContext | dict[str, Any] = {}
         for enricher in context_enrichers:
             enricher_type = enricher["type"]
             enricher_object = enricher["object"]

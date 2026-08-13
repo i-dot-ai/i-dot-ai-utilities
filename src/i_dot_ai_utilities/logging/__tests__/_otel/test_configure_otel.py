@@ -1,3 +1,4 @@
+# mypy: disable-error-code="no-untyped-def"
 """Additional tests for framework-neutral ``configure_otel``."""
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from i_dot_ai_utilities.logging._otel.setup import (
-    configure_otel,
     _otlp_exporter_kwargs,
     _reset_for_tests,
+    configure_otel,
 )
 
 
@@ -75,9 +76,7 @@ class TestOtlpExporterKwargs:
 
     def test_all_signals_receive_parsed_headers(self, monkeypatch):
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
-        monkeypatch.setenv(
-            "OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer tkn, x-tenant=iai"
-        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer tkn, x-tenant=iai")
         for signal in self.SIGNALS:
             kwargs = _otlp_exporter_kwargs(signal)
             assert kwargs["endpoint"] == f"http://collector:4318{signal}"
@@ -93,9 +92,7 @@ class TestOtlpExporterKwargs:
             assert "headers" not in _otlp_exporter_kwargs(signal)
 
     def test_endpoint_suffix_is_not_duplicated(self, monkeypatch):
-        monkeypatch.setenv(
-            "OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/v1/traces"
-        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/v1/traces")
         kwargs = _otlp_exporter_kwargs("/v1/traces")
         assert kwargs["endpoint"] == "http://collector:4318/v1/traces"
 

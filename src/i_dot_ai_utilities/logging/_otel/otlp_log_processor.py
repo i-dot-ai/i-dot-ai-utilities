@@ -17,8 +17,8 @@ def otel_otlp_log_emitter_processor(
 ) -> MutableMapping[str, Any]:
     """Emit an OTLP log record; never raise into the structlog pipeline."""
     with contextlib.suppress(Exception):
-        from opentelemetry import context as otel_context
-        from opentelemetry._logs import SeverityNumber, get_logger
+        from opentelemetry import context as otel_context  # noqa: PLC0415
+        from opentelemetry._logs import LogRecord, SeverityNumber, get_logger  # noqa: PLC0415
 
         severity_map = {
             "debug": SeverityNumber.DEBUG,
@@ -36,20 +36,23 @@ def otel_otlp_log_emitter_processor(
         for key, value in event_dict.items():
             if key in {"event", "message", "level", "timestamp", "_record", "_from_structlog"}:
                 continue
-            if isinstance(value, (str, int, float, bool)):
+            if isinstance(value, str | int | float | bool):
                 attrs[key] = value
 
-        # Keyword-arg emit works against both ProxyLogger and SDK Logger.
+        # Build a LogRecord and emit it: the Logger.emit(record) form is the
+        # only signature the OTel API defines. Passing context lets the SDK
+        # correlate the log to the active span (trace_id/span_id).
         # timestamp must be set: the SDK leaves Timestamp unset → OTLP time_unix_nano=0
         # → OpenSearch @timestamp=1970 when the exporter maps Timestamp only.
-        get_logger("i_dot_ai_utilities.logging").emit(
+        record = LogRecord(
+            timestamp=time.time_ns(),
+            context=otel_context.get_current(),
             body=body,
             severity_text=level.upper(),
             severity_number=severity_map.get(level, SeverityNumber.INFO),
             attributes=attrs,
-            context=otel_context.get_current(),
-            timestamp=time.time_ns(),
         )
+        get_logger("i_dot_ai_utilities.logging").emit(record)
     return event_dict
 
 

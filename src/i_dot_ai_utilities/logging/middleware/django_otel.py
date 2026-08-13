@@ -102,12 +102,8 @@ _EVENT_STARTED = "request_started"
 _EVENT_COMPLETED = "request_completed"
 _EVENT_FAILED = "request_failed"
 _EVENT_STARTUP = "structured_logging_middleware_otel_active"
-_EVENT_FORBIDDEN_HEADERS_REJECTED = (
-    "structured_logging_middleware_otel_forbidden_headers_rejected"
-)
-_EVENT_TRACER_PROVIDER_MISSING = (
-    "structured_logging_middleware_otel_tracer_provider_missing"
-)
+_EVENT_FORBIDDEN_HEADERS_REJECTED = "structured_logging_middleware_otel_forbidden_headers_rejected"
+_EVENT_TRACER_PROVIDER_MISSING = "structured_logging_middleware_otel_tracer_provider_missing"
 
 # Synthesised statuses when a view raises.
 _STATUS_SYNTH_ON_EXCEPTION: Final[int] = 500
@@ -194,10 +190,7 @@ class StructuredLoggingMiddlewareOTel:
             )
             raise ImproperlyConfigured(msg) from exc
         except re.error as exc:
-            msg = (
-                f"i_dot_ai_utilities logging: {SETTING_EXCLUDED_REGEXES} "
-                f"contains an invalid regex: {exc}."
-            )
+            msg = f"i_dot_ai_utilities logging: {SETTING_EXCLUDED_REGEXES} contains an invalid regex: {exc}."
             raise ImproperlyConfigured(msg) from exc
 
     @staticmethod
@@ -303,18 +296,12 @@ class StructuredLoggingMiddlewareOTel:
                 )
             except Exception as exc:  # noqa: BLE001 - last-resort observability
                 print(  # noqa: T201
-                    (
-                        f"i_dot_ai_utilities: tracer-provider-missing warning "
-                        f"failed: {type(exc).__name__}: {exc}"
-                    ),
+                    (f"i_dot_ai_utilities: tracer-provider-missing warning failed: {type(exc).__name__}: {exc}"),
                     file=sys.stderr,
                 )
         except Exception as exc:  # noqa: BLE001 - probe must never crash init
             print(  # noqa: T201
-                (
-                    f"i_dot_ai_utilities: tracer-provider probe failed: "
-                    f"{type(exc).__name__}: {exc}"
-                ),
+                (f"i_dot_ai_utilities: tracer-provider probe failed: {type(exc).__name__}: {exc}"),
                 file=sys.stderr,
             )
 
@@ -489,9 +476,7 @@ class StructuredLoggingMiddlewareOTel:
         """
         elapsed = duration_ms(start, time.monotonic())
         self._logger.set_context_field("exception.type", type(exc).__name__)
-        self._logger.set_context_field(
-            "http.response.status_code", _STATUS_SYNTH_ON_EXCEPTION
-        )
+        self._logger.set_context_field("http.response.status_code", _STATUS_SYNTH_ON_EXCEPTION)
         self._logger.set_context_field("duration_ms", elapsed)
         # (Art. 50 + OTel) ``error.type`` on the exception path uses the
         # fully-qualified class name per HTTP server semconv note 4
@@ -530,9 +515,7 @@ class StructuredLoggingMiddlewareOTel:
                 continue
             value = truncate(raw, MAX_HEADER_VALUE)
             normalised = header_name.lower().replace("-", "_")
-            self._logger.set_context_field(
-                f"http.request.header.{normalised}", value or ""
-            )
+            self._logger.set_context_field(f"http.request.header.{normalised}", value or "")
 
     def _emit(self, level: str, event: str) -> None:
         """Dispatch to the correct logger method based on computed level."""

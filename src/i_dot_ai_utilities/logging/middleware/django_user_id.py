@@ -211,8 +211,7 @@ class DjangoUserIdMiddleware:
         except Exception as exc:  # noqa: BLE001 - best-effort enrichment
             if _is_database_error(exc):
                 self._warn_db_error(
-                    "Warning(Logger): Database error reading request.user primary key; "
-                    "user.id omitted from log context"
+                    "Warning(Logger): Database error reading request.user primary key; user.id omitted from log context"
                 )
             return None
 

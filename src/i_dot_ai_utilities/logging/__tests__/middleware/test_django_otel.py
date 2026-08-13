@@ -53,6 +53,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (  # noqa: E4
 )
 
 from i_dot_ai_utilities.logging._otel.setup import (  # noqa: E402
+    _reset_for_tests,
     configure_otel_for_django,
 )
 from i_dot_ai_utilities.logging.middleware.django_otel import (  # noqa: E402
@@ -80,11 +81,23 @@ _SHARED_EXPORTER = InMemorySpanExporter()
 _SHARED_PROVIDER = TracerProvider(resource=Resource.create({"service.name": "otel-mw-tests"}))
 _SHARED_PROVIDER.add_span_processor(SimpleSpanProcessor(_SHARED_EXPORTER))
 
-configure_otel_for_django(
-    service_name="otel-mw-tests",
-    tracer_provider=_SHARED_PROVIDER,
-    install_global_propagator=True,
-)
+
+@pytest.fixture(autouse=True, scope="module")
+def _configure_otel_for_module():
+    """(Re)instrument Django against the shared exporter for this module.
+
+    Sibling ``_otel`` tests toggle the module-level instrumentation flags and
+    globally uninstrument Django. We reset first so the idempotency guard in
+    ``configure_otel_for_django`` doesn't skip re-instrumenting, then wire the
+    DjangoInstrumentor back to our shared provider. Running at test time (not
+    import time) makes this robust to whatever order pytest collects modules.
+    """
+    _reset_for_tests()
+    configure_otel_for_django(
+        service_name="otel-mw-tests",
+        tracer_provider=_SHARED_PROVIDER,
+        install_global_propagator=True,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -228,9 +241,7 @@ class TestHappyPath:
         # request_id always present; UUID4 hex when no inbound header.
         assert UUID_HEX_RE.match(completed[0]["request_id"])
 
-    def test_refresh_context_called_with_no_enrichers_and_request_scope(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_refresh_context_called_with_no_enrichers_and_request_scope(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/anything"))
@@ -282,9 +293,7 @@ class TestHappyPath:
         # Preserve the OTel instrumentation middleware added by
         # DjangoInstrumentor() — it ships as the first entry of
         # settings.MIDDLEWARE and we must keep it alongside our own.
-        otel_mw = [
-            m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()
-        ]
+        otel_mw = [m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()]
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             ROOT_URLCONF=__name__,
@@ -306,9 +315,7 @@ class TestHappyPath:
         spans = _SHARED_EXPORTER.get_finished_spans()
         assert spans, "DjangoInstrumentor did not emit a span"
         attrs_by_span = [dict(s.attributes or {}) for s in spans]
-        has_http_method = any(
-            "http.request.method" in a or "http.method" in a for a in attrs_by_span
-        )
+        has_http_method = any("http.request.method" in a or "http.method" in a for a in attrs_by_span)
         assert has_http_method, f"No span carried an HTTP method attribute. Attrs: {attrs_by_span}"
 
 
@@ -339,9 +346,7 @@ class TestStatusLevels:
 
 
 class TestExceptions:
-    def test_view_exception_emits_failed_at_error_and_reraises(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_view_exception_emits_failed_at_error_and_reraises(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
 
         def boom(_request):
@@ -437,9 +442,7 @@ class TestHeaderAllowlist:
         completed = logger.events_for("request_completed")[0]
         assert not any(k.startswith("http.request.header.") for k in completed)
 
-    def test_forbidden_header_refused_even_if_allowlisted(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_forbidden_header_refused_even_if_allowlisted(self, rf, logger, settings_sandbox):
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             I_DOT_AI_LOGGING_HEADER_ALLOWLIST=("Authorization", "X-Tenant-ID"),
@@ -467,9 +470,7 @@ class TestRequestId:
     ``upstream_request_id`` key at all (not an empty string).
     """
 
-    def test_request_id_is_always_fresh_uuid_even_with_inbound_header(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_request_id_is_always_fresh_uuid_even_with_inbound_header(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/", HTTP_X_REQUEST_ID="external-id-123"))
@@ -491,9 +492,7 @@ class TestRequestId:
         # No inbound header → no upstream_request_id key at all.
         assert "upstream_request_id" not in completed
 
-    def test_oversized_inbound_id_is_truncated_in_upstream_field(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_oversized_inbound_id_is_truncated_in_upstream_field(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/", HTTP_X_REQUEST_ID="a" * 1000))
@@ -530,9 +529,7 @@ class TestRequestId:
         assert "upstream_request_id" not in completed
         assert UUID_HEX_RE.match(completed["request_id"])
 
-    def test_empty_inbound_header_produces_no_upstream_field(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_empty_inbound_header_produces_no_upstream_field(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/", HTTP_X_REQUEST_ID=""))
@@ -541,9 +538,7 @@ class TestRequestId:
         assert "upstream_request_id" not in completed
         assert UUID_HEX_RE.match(completed["request_id"])
 
-    def test_request_id_distinct_across_two_sequential_requests(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_request_id_distinct_across_two_sequential_requests(self, rf, logger, settings_sandbox):
         """Per-hop identity: two requests through the same middleware
         instance get two different request_ids even when the inbound
         header is identical.
@@ -565,9 +560,7 @@ class TestRequestId:
 
 
 class TestScopeOwnership:
-    def test_scope_token_released_after_successful_request(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_scope_token_released_after_successful_request(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/"))
@@ -613,9 +606,7 @@ class TestHttp404CarveOut:
     server-side failure (``request_failed``).
     """
 
-    def test_http404_logged_at_warning_not_error(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_http404_logged_at_warning_not_error(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
 
         def not_found(_request):
@@ -692,9 +683,7 @@ class TestErrorType:
         completed = logger.events_for("request_completed")[0]
         assert completed["error.type"] == "502"
 
-    def test_error_type_is_fqn_on_unhandled_exception(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_error_type_is_fqn_on_unhandled_exception(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
 
         def boom(_r):
@@ -721,9 +710,7 @@ class TestEmissionIdempotency:
     regardless of control-flow path (success, Http404, unhandled exception).
     """
 
-    def test_success_emits_exactly_one_started_and_one_completed(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_success_emits_exactly_one_started_and_one_completed(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         mw(rf.get("/"))
@@ -732,9 +719,7 @@ class TestEmissionIdempotency:
         assert len(logger.events_for("request_completed")) == 1
         assert len(logger.events_for("request_failed")) == 0
 
-    def test_http404_emits_exactly_one_started_and_one_completed(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_http404_emits_exactly_one_started_and_one_completed(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
 
         def not_found(_r):
@@ -748,9 +733,7 @@ class TestEmissionIdempotency:
         assert len(logger.events_for("request_completed")) == 1
         assert len(logger.events_for("request_failed")) == 0
 
-    def test_exception_emits_exactly_one_started_and_one_failed(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_exception_emits_exactly_one_started_and_one_failed(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
 
         def boom(_r):
@@ -817,9 +800,7 @@ class TestSettingsValidation:
     ``re.error``.
     """
 
-    def test_non_iterable_excluded_prefixes_raises_improperly_configured(
-        self, logger, settings_sandbox
-    ):
+    def test_non_iterable_excluded_prefixes_raises_improperly_configured(self, logger, settings_sandbox):
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             I_DOT_AI_LOGGING_EXCLUDED_PREFIXES=12345,  # not iterable
@@ -827,9 +808,7 @@ class TestSettingsValidation:
         with pytest.raises(ImproperlyConfigured, match="iterable"):
             StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
 
-    def test_invalid_regex_in_excluded_regexes_raises_improperly_configured(
-        self, logger, settings_sandbox
-    ):
+    def test_invalid_regex_in_excluded_regexes_raises_improperly_configured(self, logger, settings_sandbox):
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             I_DOT_AI_LOGGING_EXCLUDED_REGEXES=("[unbalanced",),
@@ -837,9 +816,7 @@ class TestSettingsValidation:
         with pytest.raises(ImproperlyConfigured, match="invalid regex"):
             StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
 
-    def test_non_iterable_header_allowlist_raises_improperly_configured(
-        self, logger, settings_sandbox
-    ):
+    def test_non_iterable_header_allowlist_raises_improperly_configured(self, logger, settings_sandbox):
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             I_DOT_AI_LOGGING_HEADER_ALLOWLIST=42,  # not iterable
@@ -847,9 +824,7 @@ class TestSettingsValidation:
         with pytest.raises(ImproperlyConfigured, match="iterable"):
             StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
 
-    def test_non_string_allowlist_entries_are_silently_skipped(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_non_string_allowlist_entries_are_silently_skipped(self, rf, logger, settings_sandbox):
         """Copy-paste bugs (``None`` / ``int`` in the allowlist) must not
         brick middleware startup. Drop silently and carry on.
         """
@@ -877,25 +852,19 @@ class TestForbiddenHeaderRejectionWarning:
             I_DOT_AI_LOGGING_HEADER_ALLOWLIST=("Authorization", "X-OK", "Cookie"),
         )
         StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
-        rejected = logger.events_for(
-            "structured_logging_middleware_otel_forbidden_headers_rejected"
-        )
+        rejected = logger.events_for("structured_logging_middleware_otel_forbidden_headers_rejected")
         assert len(rejected) == 1
         assert "Authorization" in rejected[0]["rejected"]
         assert "Cookie" in rejected[0]["rejected"]
         assert "X-OK" not in rejected[0]["rejected"]
 
-    def test_no_warning_when_allowlist_has_no_forbidden_entries(
-        self, logger, settings_sandbox
-    ):
+    def test_no_warning_when_allowlist_has_no_forbidden_entries(self, logger, settings_sandbox):
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             I_DOT_AI_LOGGING_HEADER_ALLOWLIST=("X-Tenant-ID", "X-Request-Origin"),
         )
         StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
-        rejected = logger.events_for(
-            "structured_logging_middleware_otel_forbidden_headers_rejected"
-        )
+        rejected = logger.events_for("structured_logging_middleware_otel_forbidden_headers_rejected")
         assert len(rejected) == 0
 
     def test_case_insensitive_rejection(self, logger, settings_sandbox):
@@ -904,9 +873,7 @@ class TestForbiddenHeaderRejectionWarning:
             I_DOT_AI_LOGGING_HEADER_ALLOWLIST=("AUTHORIZATION", "CoOkIe"),
         )
         StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
-        rejected = logger.events_for(
-            "structured_logging_middleware_otel_forbidden_headers_rejected"
-        )
+        rejected = logger.events_for("structured_logging_middleware_otel_forbidden_headers_rejected")
         assert len(rejected) == 1
         assert set(rejected[0]["rejected"]) == {"AUTHORIZATION", "CoOkIe"}
 
@@ -924,9 +891,7 @@ class TestTraceContextPrecedence:
     which is the source of truth for ``trace_id`` in this middleware.
     """
 
-    def test_w3c_traceparent_wins_over_amzn_header(
-        self, logger, settings_sandbox
-    ):
+    def test_w3c_traceparent_wins_over_amzn_header(self, logger, settings_sandbox):
         from django.http import HttpResponse as _HttpResponse  # noqa: PLC0415
         from django.test import Client  # noqa: PLC0415
         from django.urls import clear_url_caches, path  # noqa: PLC0415
@@ -934,9 +899,7 @@ class TestTraceContextPrecedence:
         def _ok(_request):
             return _HttpResponse(status=200)
 
-        otel_mw = [
-            m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()
-        ]
+        otel_mw = [m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()]
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             ROOT_URLCONF=__name__,
@@ -960,10 +923,7 @@ class TestTraceContextPrecedence:
                 # override the trace id with a different value. The
                 # composite propagator is ordered so W3C extracts last
                 # and therefore wins.
-                HTTP_X_AMZN_TRACE_ID=(
-                    "Root=1-6758db72-1234567890abcdef12345678;"
-                    "Parent=53995c3f42cd8ad8;Sampled=1"
-                ),
+                HTTP_X_AMZN_TRACE_ID=("Root=1-6758db72-1234567890abcdef12345678;Parent=53995c3f42cd8ad8;Sampled=1"),
             )
         finally:
             urlpatterns = prev
@@ -978,9 +938,7 @@ class TestTraceContextPrecedence:
         actual_hex = format(server_span.get_span_context().trace_id, "032x")
         assert actual_hex == w3c_trace_id
 
-    def test_amzn_header_used_when_no_traceparent(
-        self, logger, settings_sandbox
-    ):
+    def test_amzn_header_used_when_no_traceparent(self, logger, settings_sandbox):
         from django.http import HttpResponse as _HttpResponse  # noqa: PLC0415
         from django.test import Client  # noqa: PLC0415
         from django.urls import clear_url_caches, path  # noqa: PLC0415
@@ -988,9 +946,7 @@ class TestTraceContextPrecedence:
         def _ok(_request):
             return _HttpResponse(status=200)
 
-        otel_mw = [
-            m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()
-        ]
+        otel_mw = [m for m in django_settings.MIDDLEWARE if "opentelemetry" in m.lower()]
         settings_sandbox(
             I_DOT_AI_LOGGER=logger,
             ROOT_URLCONF=__name__,
@@ -1015,10 +971,7 @@ class TestTraceContextPrecedence:
             client = Client()
             response = client.get(
                 "/xray-test",
-                HTTP_X_AMZN_TRACE_ID=(
-                    f"Root=1-{amzn_epoch}-{amzn_random};"
-                    f"Parent={amzn_parent};Sampled=1"
-                ),
+                HTTP_X_AMZN_TRACE_ID=(f"Root=1-{amzn_epoch}-{amzn_random};Parent={amzn_parent};Sampled=1"),
             )
         finally:
             urlpatterns = prev
@@ -1039,9 +992,7 @@ class TestTraceContextPrecedence:
 
 
 class TestProcessExceptionSafety:
-    def test_process_exception_never_raises_and_writes_nothing(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_process_exception_never_raises_and_writes_nothing(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
         # Clear context and verify no writes happen via the hook.
@@ -1119,9 +1070,7 @@ class TestTracerProviderMissingWarning:
         finally:
             self._restore_provider(prev)
 
-        missing = logger.events_for(
-            "structured_logging_middleware_otel_tracer_provider_missing"
-        )
+        missing = logger.events_for("structured_logging_middleware_otel_tracer_provider_missing")
         assert len(missing) == 1
         event = missing[0]
         assert event["log_level"] == "warning"
@@ -1135,9 +1084,7 @@ class TestTracerProviderMissingWarning:
         """
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         StructuredLoggingMiddlewareOTel(lambda _r: HttpResponse(status=200))
-        missing = logger.events_for(
-            "structured_logging_middleware_otel_tracer_provider_missing"
-        )
+        missing = logger.events_for("structured_logging_middleware_otel_tracer_provider_missing")
         assert len(missing) == 0
 
     def test_warning_emission_failure_does_not_crash_init(self, settings_sandbox, capsys):
@@ -1199,9 +1146,7 @@ class TestStartupStderrFallback:
     with a half-broken logger" path tractable.
     """
 
-    def test_startup_info_log_failure_falls_back_to_stderr(
-        self, settings_sandbox, capsys
-    ):
+    def test_startup_info_log_failure_falls_back_to_stderr(self, settings_sandbox, capsys):
         class BrokenInfoLogger:
             """Logger whose ``info`` raises — exercises the first stderr
             fallback path in ``_emit_startup_log``."""
@@ -1235,9 +1180,7 @@ class TestStartupStderrFallback:
         # operators can grep for it.
         assert "RuntimeError" in captured.err
 
-    def test_forbidden_headers_warning_failure_falls_back_to_stderr(
-        self, settings_sandbox, capsys
-    ):
+    def test_forbidden_headers_warning_failure_falls_back_to_stderr(self, settings_sandbox, capsys):
         """When a forbidden header is supplied AND the logger's
         ``warning`` call raises, the middleware still constructs
         successfully with a stderr fallback naming the failure.

@@ -26,10 +26,10 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
-from i_dot_ai_utilities.logging._otel.propagators import build_composite_propagator
 from i_dot_ai_utilities.logging._otel.otlp_log_processor import (
     otel_otlp_log_emitter_processor,
 )
+from i_dot_ai_utilities.logging._otel.propagators import build_composite_propagator
 from i_dot_ai_utilities.logging._otel.structlog_processor import (
     otel_trace_context_processor,
 )
@@ -49,9 +49,7 @@ def _build_resource(service_name: str) -> Resource:
     if version:
         attrs["service.version"] = version
     # Prefer the current SemConv name; fall back to legacy ENVIRONMENT.
-    environment = (
-        os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
-    )
+    environment = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
     env_name = os.environ.get("DEPLOYMENT_ENVIRONMENT") or os.environ.get("ENVIRONMENT")
     # Parse deployment.environment.name from OTEL_RESOURCE_ATTRIBUTES if present.
     if "deployment.environment.name=" in environment:
@@ -78,7 +76,7 @@ def _build_resource(service_name: str) -> Resource:
 def _build_id_generator() -> Any | None:
     """Return an X-Ray-compatible IdGenerator when the AWS extension is installed."""
     with contextlib.suppress(ImportError):
-        from opentelemetry.sdk.extension.aws.trace import AwsXRayIdGenerator
+        from opentelemetry.sdk.extension.aws.trace import AwsXRayIdGenerator  # noqa: PLC0415
 
         return AwsXRayIdGenerator()
     return None
@@ -110,7 +108,7 @@ def _default_otlp_span_exporter() -> SpanExporter | None:
     if kwargs is None:
         return None
     with contextlib.suppress(ImportError):
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # noqa: PLC0415
 
         return OTLPSpanExporter(**kwargs)
     return None
@@ -134,10 +132,11 @@ def _require_otlp_endpoint_or_raise() -> None:
     """Fail visibly in AWS when OTLP endpoint is required but missing."""
     require = os.environ.get("OTEL_REQUIRE_ENDPOINT", "").lower() in {"1", "true", "yes"}
     if require and not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        raise RuntimeError(
+        msg = (
             "OTEL_REQUIRE_ENDPOINT is set but OTEL_EXPORTER_OTLP_ENDPOINT is missing. "
             "Refusing silent console/localhost export."
         )
+        raise RuntimeError(msg)
 
 
 def _configure_metrics(resource: Resource) -> None:
@@ -146,9 +145,9 @@ def _configure_metrics(resource: Resource) -> None:
     if kwargs is None:
         return
     with contextlib.suppress(Exception):
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter  # noqa: PLC0415
+        from opentelemetry.sdk.metrics import MeterProvider  # noqa: PLC0415
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader  # noqa: PLC0415
 
         reader = PeriodicExportingMetricReader(
             OTLPMetricExporter(**kwargs),
@@ -164,35 +163,34 @@ def _configure_logs_bridge(resource: Resource) -> None:
     if kwargs is None:
         return
     try:
-        import logging
+        import logging  # noqa: PLC0415
 
-        from opentelemetry._logs import set_logger_provider
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry._logs import set_logger_provider  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter  # noqa: PLC0415
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # noqa: PLC0415
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # noqa: PLC0415
 
         provider = LoggerProvider(resource=resource)
-        provider.add_log_record_processor(
-            BatchLogRecordProcessor(OTLPLogExporter(**kwargs))
-        )
+        provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(**kwargs)))
         set_logger_provider(provider)
         # Stdlib bridge for code paths that use logging.getLogger().
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
         logging.getLogger().addHandler(handler)
-    except Exception as exc:  # noqa: BLE001 - bootstrap must not crash the app
-        import sys
+    except Exception:  # noqa: BLE001 - bootstrap must not crash the app
+        import logging  # noqa: PLC0415
 
-        print(f"WARNING: OTLP logs bridge not configured: {exc}", file=sys.stderr)
+        logging.getLogger(__name__).warning("OTLP logs bridge not configured", exc_info=True)
 
 
 def _insert_trace_processor(processors: list[Any]) -> list[Any]:
+    # Trace context must precede the log emitter so emitted OTLP logs carry
+    # trace_id/span_id; both go before the renderer (assumed last).
     new_processors = list(processors)
-    for proc in (otel_trace_context_processor, otel_otlp_log_emitter_processor):
-        if proc not in new_processors:
-            if not new_processors:
-                new_processors.append(proc)
-            else:
-                new_processors.insert(len(new_processors) - 1, proc)
+    to_add = [
+        proc for proc in (otel_trace_context_processor, otel_otlp_log_emitter_processor) if proc not in new_processors
+    ]
+    insert_at = max(len(new_processors) - 1, 0)
+    new_processors[insert_at:insert_at] = to_add
     return new_processors
 
 
@@ -229,13 +227,15 @@ def configure_otel(
         if id_generator is not None:
             kwargs["id_generator"] = id_generator
         tracer_provider = TracerProvider(**kwargs)
+        exporter: SpanExporter | None
         if span_exporter is not None:
             exporter = span_exporter
         else:
             exporter = _default_otlp_span_exporter()
             if exporter is None:
                 if os.environ.get("OTEL_REQUIRE_ENDPOINT", "").lower() in {"1", "true", "yes"}:
-                    raise RuntimeError("OTLP span exporter unavailable despite required endpoint")
+                    msg = "OTLP span exporter unavailable despite required endpoint"
+                    raise RuntimeError(msg)
                 exporter = ConsoleSpanExporter()
         tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
 
@@ -280,7 +280,7 @@ def configure_otel_for_django(
     )
 
     if not _django_instrumented:
-        from opentelemetry.instrumentation.django import DjangoInstrumentor
+        from opentelemetry.instrumentation.django import DjangoInstrumentor  # noqa: PLC0415
 
         DjangoInstrumentor().instrument(tracer_provider=provider)
         _django_instrumented = True
@@ -312,7 +312,7 @@ def configure_otel_for_fastapi(
 
     if not _fastapi_instrumented:
         with contextlib.suppress(ImportError):
-            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: PLC0415
 
             if app is not None:
                 FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
@@ -335,7 +335,7 @@ def ensure_structlog_otel_processors() -> None:
     hand-roll processor list surgery.
     """
     with contextlib.suppress(Exception):
-        import structlog
+        import structlog  # noqa: PLC0415
 
         current = list(structlog.get_config().get("processors", []))
         updated = _insert_trace_processor(current)
@@ -372,7 +372,7 @@ def force_flush_otel(timeout_millis: int = 5000) -> None:
         if hasattr(meter, "force_flush"):
             meter.force_flush(timeout_millis)
     with contextlib.suppress(Exception):
-        from opentelemetry._logs import get_logger_provider
+        from opentelemetry._logs import get_logger_provider  # noqa: PLC0415
 
         logs_provider = get_logger_provider()
         if hasattr(logs_provider, "force_flush"):
@@ -383,11 +383,11 @@ def _reset_for_tests() -> None:
     """Reset module-level instrumentation flags (tests only)."""
     global _django_instrumented, _fastapi_instrumented, _configured  # noqa: PLW0603
     with contextlib.suppress(Exception):
-        from opentelemetry.instrumentation.django import DjangoInstrumentor
+        from opentelemetry.instrumentation.django import DjangoInstrumentor  # noqa: PLC0415
 
         DjangoInstrumentor().uninstrument()
     with contextlib.suppress(Exception):
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: PLC0415
 
         FastAPIInstrumentor().uninstrument()
     _django_instrumented = False

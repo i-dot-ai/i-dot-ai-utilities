@@ -234,9 +234,7 @@ class TestSkippedPaths:
         assert logger.context == {}
         assert logger.warnings == []
 
-    def test_is_authenticated_not_exactly_true_is_treated_as_anonymous(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_is_authenticated_not_exactly_true_is_treated_as_anonymous(self, rf, logger, settings_sandbox):
         """Truthy-but-not-True values must not bind user.id.
 
         Defensive against duck-typed or mocked user objects whose
@@ -263,9 +261,7 @@ class TestSkippedPaths:
         assert logger.context == {}
         assert logger.warnings == []
 
-    def test_authenticated_but_pk_and_id_both_none_emits_nothing(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_authenticated_but_pk_and_id_both_none_emits_nothing(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         request = rf.get("/")
         request.user = _FakeUser(is_authenticated=True, pk=None, id=None)
@@ -304,9 +300,7 @@ class TestUnhydratedLazyObject:
 
         assert logger.context == {}
 
-    def test_lazy_hydrated_falls_through_to_normal_path(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_lazy_hydrated_falls_through_to_normal_path(self, rf, logger, settings_sandbox):
         """A lazy wrapper whose ``_wrapped`` is a real user must NOT be
         treated as unhydrated — we drop into the normal extraction path.
 
@@ -383,9 +377,7 @@ class _NonDbExceptionOnIsAuth:
 
 
 class TestDatabaseErrors:
-    def test_db_error_on_is_authenticated_warns_and_continues(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_db_error_on_is_authenticated_warns_and_continues(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         request = rf.get("/")
         request.user = _ExplodingUserIsAuth()
@@ -413,9 +405,7 @@ class TestDatabaseErrors:
         assert "primary key" in logger.warnings[0]
         assert "Database error" in logger.warnings[0]
 
-    def test_non_db_exception_on_is_authenticated_is_silenced_without_warning(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_non_db_exception_on_is_authenticated_is_silenced_without_warning(self, rf, logger, settings_sandbox):
         """Non-DB errors are observability problems, not user-visible ones.
 
         The middleware must still not take the request down, but it also
@@ -445,9 +435,7 @@ class TestProtocol:
         with pytest.raises(MiddlewareNotUsed):
             DjangoUserIdMiddleware(lambda _r: HttpResponse(status=200))
 
-    def test_process_exception_returns_none_and_leaves_context_untouched(
-        self, rf, logger, settings_sandbox
-    ):
+    def test_process_exception_returns_none_and_leaves_context_untouched(self, rf, logger, settings_sandbox):
         settings_sandbox(I_DOT_AI_LOGGER=logger)
         mw = DjangoUserIdMiddleware(lambda _r: HttpResponse(status=200))
 
@@ -462,9 +450,7 @@ class TestProtocol:
         assert DjangoUserIdMiddleware.sync_capable is True
         assert DjangoUserIdMiddleware.async_capable is False
 
-    def test_broken_logger_warning_falls_back_to_stderr_without_crashing(
-        self, rf, settings_sandbox, capsys
-    ):
+    def test_broken_logger_warning_falls_back_to_stderr_without_crashing(self, rf, settings_sandbox, capsys):
         class BrokenLogger:
             def set_context_field(self, *_a: Any, **_k: Any) -> None:
                 pass
