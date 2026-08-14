@@ -11,6 +11,8 @@ When installing the package, the base package comes with only the `logger` modul
 - file_store
 - litellm
 - metrics
+- otel
+- django
 - all
 
 To install the package, use your package manager of choice:
@@ -63,16 +65,18 @@ As the end-user, you'll have to make sure that the API key issued to you by Lite
 
 More information on usage and setup can be found in the [litellm library readme](./src/i_dot_ai_utilities/litellm/README.md).
 
+#### OpenTelemetry & Django middleware
+
+The `otel` extra adds an OpenTelemetry bootstrap (`configure_otel` and the framework helpers `configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and an optional structlog log bridge to an OTLP endpoint, with W3C + AWS X-Ray propagation.
+
+The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution.
+
+You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+
 ### Future features:
 
-- authentication
 - authorisation
 - vector stores
-
-## Settings
-
-This is where some of the above can be found:
-
 
 ## How to use
 
@@ -90,20 +94,17 @@ Releases must be manually created, after which the specified package version wil
 
 You may release a pre-release tag to the test version of PyPI by specifying the release as a pre-release on creation. This allows for the testing of a tag in a safe environment before merging to main.
 
-To test a pre-release tag, you can follow these steps in a repo of your choice:
-1. Update pyproject.toml:
-```
-[[tool.poetry.source]]
-name = "test-pypi"
-url = "https://test.pypi.org/simple/"
-priority = "supplemental"
-```
-2. Load the specific version into the environment (replacing version number as required)
-```
-poetry add --source test-pypi i-dot-ai-utilities==0.1.1rc202506301522
+To pull a pre-release tag into a consuming repo, point your installer at Test PyPI and pin the exact version (replace the version as required):
+
+```bash
+uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities==0.1.1rc202506301522"
 ```
 
+Or with pip:
 
+```bash
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities==0.1.1rc202506301522"
+```
 
 ## Licence
 
