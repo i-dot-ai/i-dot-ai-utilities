@@ -94,21 +94,46 @@ When making changes or adding tests, please ensure tests run in isolation, as fa
 
 ### CI/CD & Releases
 
-Releases must be manually created, after which the specified package version will be released to PyPI. As such, release names must adhere to semantic versioning. They must *not* be prefixed with a `v`.
+Package versions are published to PyPI by the `Publish python package` workflow. Version names must adhere to semantic versioning and must *not* be prefixed with a `v`. Merging to `main` does **not** publish anything; publishing is always a deliberate action.
 
-You may release a pre-release tag to the test version of PyPI by specifying the release as a pre-release on creation. This allows for the testing of a tag in a safe environment before merging to main.
+There are three publish channels:
 
-To pull a pre-release tag into a consuming repo, point your installer at Test PyPI and pin the exact version (replace the version as required):
+| Channel | How to trigger | Version stamped | Published to |
+|---|---|---|---|
+| **Stable release** | Create a GitHub Release, **not** marked as a pre-release | bare tag (e.g. `0.6.0`) | production PyPI |
+| **Pre-release → production** | Run the workflow manually (`Actions → Publish python package → Run workflow`) with `pypi=production` and an existing pre-release tag | tag verbatim (e.g. `0.6.0rc1`) | production PyPI |
+| **Pre-release → test** | Create a GitHub Release, marked as a pre-release | `<tag>.<timestamp>` | Test PyPI |
+
+Notes:
+
+- **Manual dispatch is pre-release only.** The workflow rejects a manual `production` publish whose version is not a PEP 440 pre-release (an `rc` / `a` / `b` / `.dev` suffix). Cut stable releases through the GitHub Release flow.
+- **The tag must already exist before a manual dispatch.** The workflow checks out the tag you pass; create and push it first.
+
+#### Installing a pre-release
+
+**From production PyPI** (pre-release → production channel): pip will not resolve a PEP 440 pre-release unless you opt in with `--pre` or pin the exact version, so ordinary consumers stay on the latest stable automatically.
 
 ```bash
-uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities==0.1.1rc202506301522"
+# opt in to pre-releases (resolves the newest rc)
+pip install --pre "i-dot-ai-utilities[django,otel]"
+
+# or pin the exact pre-release version
+pip install "i-dot-ai-utilities[django,otel]==0.6.0rc1"
+```
+
+**From Test PyPI** (pre-release → test channel): point your installer at Test PyPI, provide production PyPI as a fallback index so runtime dependencies resolve, and pin the exact **timestamped** version the workflow generated (replace the version as required):
+
+```bash
+uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[django,otel]==0.1.1rc202506301522"
 ```
 
 Or with pip:
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities==0.1.1rc202506301522"
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[django,otel]==0.1.1rc202506301522"
 ```
+
+`--pre` alone is not enough for the Test PyPI channel: the package only exists on Test PyPI, so you must also point the installer at that index (and keep production PyPI as a fallback for dependencies).
 
 ## Licence
 

@@ -188,6 +188,8 @@ Trace correlation on log records comes from a structlog processor reading the ac
 pip install --pre "i-dot-ai-utilities[django,otel]"
 ```
 
+> **Pre-release channels:** this OTel/Django functionality is opt-in and only compatible with our new observability stack — not the existing one. The command above works when the pre-release was published to **production PyPI**. If it was published to **Test PyPI** instead, `--pre` alone is not enough: you must also point the installer at Test PyPI (with a production fallback index for dependencies) and pin the exact timestamped version. See [CI/CD & Releases](../../../README.md#cicd--releases) in the root README for the full per-channel install commands.
+
 **Configure OTel once at startup** (`wsgi.py`, `asgi.py`, or an `AppConfig.ready()`):
 
 ```python
