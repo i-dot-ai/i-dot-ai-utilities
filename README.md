@@ -11,8 +11,8 @@ When installing the package, the base package comes with only the `logger` modul
 - file_store
 - litellm
 - metrics
-- otel
-- django
+- otel _(pre-release)_
+- django _(pre-release)_
 - all
 
 To install the package, use your package manager of choice:
@@ -26,6 +26,8 @@ uv pip install "i-dot-ai-utilities[all]"
 ```
 
 Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
+
+> ⚠️ **The `otel` and `django` extras are pre-release, use with caution.** They're compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pass `--pre` (or pin the pre-release version) to install them; a plain `pip install` won't pull a pre-release. `[all]` pulls them in too, so it also needs `--pre` during the pre-release window.
 
 ## Features
 
@@ -71,7 +73,7 @@ The `otel` extra adds an OpenTelemetry bootstrap (`configure_otel` and the frame
 
 The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution.
 
-> ⚠️ **Pre-release, use with caution.** The `otel` and `django` extras ship as a pre-release and are compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pin the pre-release explicitly (see below); a plain `pip install` won't pull it.
+> ⚠️ **Pre-release, use with caution** (see the [Installation](#installation) note): compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack.
 
 You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
 
