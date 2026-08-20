@@ -71,6 +71,8 @@ The `otel` extra adds an OpenTelemetry bootstrap (`configure_otel` and the frame
 
 The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution.
 
+> ⚠️ **Pre-release, use with caution.** The `otel` and `django` extras ship as a pre-release and are compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pin the pre-release explicitly (see below); a plain `pip install` won't pull it.
+
 You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
 
 ### Future features:

@@ -65,8 +65,8 @@ class _BareStructlogAdapter:
     ``structlog.get_logger(__name__)``. That object exposes
     ``info``/``warning``/``error``/``exception`` but not ``refresh_context``
     / ``set_context_field`` (the latter are library-specific conveniences).
-    Wrapping keeps the middleware's call sites uniform and honours Art. 22
-    by never calling ``structlog.configure``.
+    Wrapping keeps the middleware's call sites uniform, and never
+    calls ``structlog.configure``.
 
     ``refresh_context`` clears ``structlog.contextvars`` and invokes any
     supplied enrichers directly through ``EnrichmentProvider``. That matches
@@ -145,7 +145,7 @@ def _default_logger() -> Any:
     the latter's ``__init__`` calls
     ``ProcessorHelper().configure_processors(...)``, which globally mutates
     ``structlog`` configuration. The middleware is forbidden from calling
-    ``structlog.configure()`` (constitution Art. 22), so the default path must
+    ``structlog.configure()``, so the default path must
     not trigger it transitively either. Consumers who want the full
     ``StructuredLogger`` experience should construct one in their own
     ``settings.py`` and pass it via ``I_DOT_AI_LOGGER``.

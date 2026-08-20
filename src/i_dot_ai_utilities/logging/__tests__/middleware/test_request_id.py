@@ -2,8 +2,8 @@
 """Unit tests for ``middleware._headers.validate_request_id``.
 
 This helper is the single line of defence between an attacker-controlled
-``X-Request-ID`` header and the log context. Its failure mode is
-security finding A3: accepting structural characters verbatim enables
+``X-Request-ID`` header and the log context. Its failure mode:
+accepting structural characters verbatim enables
 log-injection, log-search hijack, and cross-tenant correlation poisoning.
 
 Every rejection case below documents a specific attack class. Keep the
@@ -153,7 +153,7 @@ class TestTruncation:
 
 class TestInjectionPayloadsRejected:
     """Regression tests for known-bad payloads. These are the exact
-    shapes security reviewers have flagged; keep them here so reviewers
+    shapes that enable log-injection; keep them here so reviewers
     can verify mitigation by name.
     """
 

@@ -151,7 +151,7 @@ class StructuredLoggingMiddlewareOTel:
         raw_allowlist = getattr(settings, SETTING_HEADER_ALLOWLIST, ())
         self._header_allowlist, rejected = self._normalise_header_allowlist(raw_allowlist)
 
-        # (Art. 6, 51) One startup line so operators can see the middleware
+        # One startup line so operators can see the middleware
         # is active; bind the schema version so the version is on the event
         # regardless of whether the consumer also inspects per-request logs.
         # A broken logger must not crash the worker; fall back to stderr so
@@ -175,7 +175,7 @@ class StructuredLoggingMiddlewareOTel:
         regexes_raw: object,
     ) -> ExclusionMatcher:
         """Construct the path-exclusion matcher, mapping malformed input
-        to ``ImproperlyConfigured`` (Art. 15).
+        to ``ImproperlyConfigured``.
         """
         # A bare str/bytes is iterable, so ExclusionMatcher would silently
         # treat "/health/" as five single-character prefixes instead of one.
@@ -207,7 +207,7 @@ class StructuredLoggingMiddlewareOTel:
     def _normalise_header_allowlist(
         raw_allowlist: object,
     ) -> tuple[tuple[str, ...], list[str]]:
-        """Apply the denylist floor to the header allowlist (Art. 52, 53).
+        """Apply the denylist floor to the header allowlist.
 
         Returns ``(filtered_allowlist, rejected_names)``. Non-string entries
         are dropped silently (copy-paste bugs shouldn't brick startup).
@@ -324,7 +324,7 @@ class StructuredLoggingMiddlewareOTel:
             )
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        # (Art. 21) Clear ``structlog.contextvars`` FIRST, before header
+        # Clear ``structlog.contextvars`` FIRST, before header
         # parsing, before the timer starts, before anything that could
         # raise. Protects against residual context leaking from a prior
         # request on the same Gunicorn sync-worker thread. The clear
@@ -351,17 +351,17 @@ class StructuredLoggingMiddlewareOTel:
         # mid-request.
         scope_token = _claim_request_scope(REQUEST_SCOPE_OWNER_MIDDLEWARE)
         try:
-            # (Art. 51) Bind the schema version as soon as ownership is
+            # Bind the schema version as soon as ownership is
             # established so it appears on every event emitted during
             # this request.
             self._logger.set_context_field("logging_schema_version", _SCHEMA_VERSION)
 
-            # (Art. 48) Exclusions: skip logging entirely. Still call
+            # Exclusions: skip logging entirely. Still call
             # through to the view so health probes work.
             if self._exclusions.matches(request.path):
                 return self._get_response(request)
 
-            # (Art. 30, 32) Per-hop correlation id.
+            # Per-hop correlation id.
             # - ``request_id`` is ALWAYS a freshly generated UUID4 hex
             #   (distinct from trace_id, which comes from the OTel span).
             # - Any valid inbound ``X-Request-ID`` is preserved verbatim
@@ -369,12 +369,12 @@ class StructuredLoggingMiddlewareOTel:
             #   inbound values produce no ``upstream_request_id`` field.
             self._bind_request_ids(request)
 
-            # (Art. 53, 54) Allowlisted header capture. Denylist floor is
+            # Allowlisted header capture. Denylist floor is
             # enforced at ``__init__`` time; header values are length-
             # capped here.
             self._bind_allowlisted_headers(request)
 
-            # (Art. 37) Start the timer AFTER refresh_context so context-
+            # Start the timer AFTER refresh_context so context-
             # setup cost is not counted, but before we log
             # ``request_started`` so the two log events bracket the same
             # interval.
@@ -382,7 +382,7 @@ class StructuredLoggingMiddlewareOTel:
 
             self._logger.info(_EVENT_STARTED)
 
-            # (Art. 40, 47) ``try`` / ``except`` / ``finally`` with an
+            # ``try`` / ``except`` / ``finally`` with an
             # idempotency guard: the completion event is emitted from
             # ``finally`` when the exception branches did not already log
             # their own event, so every non-excluded request produces
@@ -395,7 +395,7 @@ class StructuredLoggingMiddlewareOTel:
                 response = self._get_response(request)
                 status_code = getattr(response, "status_code", _STATUS_SYNTH_ON_EXCEPTION)
             except Http404 as exc:
-                # (Art. 46) 404 is ordinary traffic; log at WARNING, never
+                # 404 is ordinary traffic; log at WARNING, never
                 # ERROR, and synthesise status 404 rather than the generic
                 # 500. ``error.type`` uses the status code string per OTel
                 # HTTP server semconv guidance.
@@ -403,7 +403,7 @@ class StructuredLoggingMiddlewareOTel:
                 emitted = True
                 raise
             except Exception as exc:
-                # (Art. 40-44) Log inside the ``except`` block so
+                # Log inside the ``except`` block so
                 # ``sys.exc_info`` captures the traceback. Synthesise
                 # status 500, bind OTel-aligned ``error.type`` (FQN), then
                 # re-raise with bare ``raise`` to preserve the traceback
@@ -421,7 +421,7 @@ class StructuredLoggingMiddlewareOTel:
                     assert response is not None  # for type narrowing  # noqa: S101
                     self._emit_completed(start, status_code)
 
-            # (Art. 3) Return the response object unchanged.
+            # Return the response object unchanged.
             return response
         finally:
             _release_request_scope(scope_token)
@@ -458,7 +458,7 @@ class StructuredLoggingMiddlewareOTel:
         elapsed = duration_ms(start, time.monotonic())
         self._logger.set_context_field("http.response.status_code", status_code)
         self._logger.set_context_field("duration_ms", elapsed)
-        # (Art. 50 + OTel) ``error.type`` for non-2xx/3xx responses. Uses
+        # ``error.type`` for non-2xx/3xx responses. Uses
         # the HTTP status code string per the HTTP semconv note 4.
         if status_code >= _STATUS_ERROR_THRESHOLD:
             self._logger.set_context_field("error.type", str(status_code))
@@ -469,8 +469,7 @@ class StructuredLoggingMiddlewareOTel:
     def _emit_http404(self, start: float, exc: Http404) -> None:
         """Log ``Http404`` at WARNING with synthetic status 404.
 
-        Constitution Art. 46: ``Http404`` MUST be logged at INFO or WARNING,
-        never ERROR. We pick WARNING so it mirrors the normal
+        ``Http404`` is logged at WARNING, never ERROR, so it mirrors the normal
         ``level_for_status(404)`` result and consumers see a single rule:
         "4xx → warning". Emits ``request_completed`` (not ``request_failed``)
         because a 404 is an ordinary outcome, not a server-side failure.
@@ -489,13 +488,13 @@ class StructuredLoggingMiddlewareOTel:
         """Log an unhandled exception at ERROR and synthesise status 500.
 
         Must be called from inside the ``except`` block so ``logger.exception``
-        picks up ``sys.exc_info`` correctly (Art. 42).
+        picks up ``sys.exc_info`` correctly.
         """
         elapsed = duration_ms(start, time.monotonic())
         self._logger.set_context_field("exception.type", type(exc).__name__)
         self._logger.set_context_field("http.response.status_code", _STATUS_SYNTH_ON_EXCEPTION)
         self._logger.set_context_field("duration_ms", elapsed)
-        # (Art. 50 + OTel) ``error.type`` on the exception path uses the
+        # ``error.type`` on the exception path uses the
         # fully-qualified class name per HTTP server semconv note 4
         # ("exception type (its fully-qualified class name, if applicable)").
         cls = type(exc)
@@ -508,11 +507,11 @@ class StructuredLoggingMiddlewareOTel:
     def _bind_request_ids(self, request: HttpRequest) -> None:
         """Bind ``request_id`` (always fresh) and optional ``upstream_request_id``.
 
-        Constitution Art. 32: ``request_id`` MUST be a fresh per-hop UUID4,
-        distinct from any inbound correlation value. Art. 30: inbound
-        ``X-Request-ID`` is accepted verbatim, length-capped, and charset-
-        restricted (security finding A3, block log-injection / log-search
-        hijack via attacker-chosen identifiers). When validation rejects an
+        ``request_id`` is always a fresh per-hop UUID4, distinct from any
+        inbound correlation value. Inbound ``X-Request-ID`` is accepted
+        verbatim, length-capped, and charset-restricted to block
+        log-injection / log-search hijack via attacker-chosen identifiers.
+        When validation rejects an
         inbound value, ``upstream_request_id`` is simply omitted; the
         locally-minted ``request_id`` is unaffected.
         """

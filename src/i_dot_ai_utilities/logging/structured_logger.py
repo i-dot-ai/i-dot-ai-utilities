@@ -28,25 +28,12 @@ if TYPE_CHECKING:
     from i_dot_ai_utilities.logging.types.lambda_enrichment_schema import ExtractedLambdaContext
 
 
-# ---------------------------------------------------------------------------
-# Request-scope ownership
-# ---------------------------------------------------------------------------
-#
 # When a framework integration (e.g. ``StructuredLoggingMiddlewareOTel``) owns the
-# lifecycle of the structured-log context for the duration of a request, it
-# sets this contextvar with a sentinel token before rebuilding the context and
-# clears it in ``finally``. Inside that window, manual ``refresh_context``
-# calls with ``scope="manual"`` or ``scope="request"`` (typically from views
-# or helper utilities written before the middleware existed) are downgraded
-# to no-ops and a warning is emitted.
-#
-# The goal is to eliminate the silent de-correlation described in the security
-# review's residual finding: two independent callers fighting over the same
-# mutable ``structlog.contextvars`` state produce logs that look coherent but
-# are causally disconnected from the originating request.
-#
-# Job workers (e.g. RQ / Celery) legitimately need to reset context per-job
-# and pass ``scope="job"`` to opt out of the ownership check.
+# request's log context, it claims this contextvar for the request's duration and
+# manual ``refresh_context`` calls (scope "manual"/"request") are downgraded to
+# no-ops. Two callers mutating the same ``structlog.contextvars`` state would
+# otherwise silently de-correlate a request's logs. Job workers pass ``scope="job"``
+# to opt out and reset context per-job.
 
 REQUEST_SCOPE_OWNER_MIDDLEWARE: str = "middleware"
 
@@ -222,13 +209,12 @@ class StructuredLogger:
         """Reset the logger, creating a new context id and removing any custom fields set since the previous invocation.
 
         :param context_enrichers: A list of one or more ContextEnrichmentOptions. Used to refresh the new logger with fields from well-known frameworks, such as FastAPI request metadata.
-        :param scope: The scope of the refresh. Callers inside a framework
+        :param scope: The scope of the refresh. Calls inside a framework
             integration that already owns the request's log-context lifecycle
-            (e.g. Django's ``StructuredLoggingMiddlewareOTel``) should be treated
-            as no-ops to avoid silent de-correlation of audit trails
-            (security finding: residual flaw). Pass ``"job"`` for background
-            workers that legitimately need to reset per-job context regardless
-            of any request scope. Defaults to ``"manual"``.
+            (e.g. Django's ``StructuredLoggingMiddlewareOTel``) are treated as
+            no-ops to avoid silently de-correlating a request's logs. Pass
+            ``"job"`` for background workers that legitimately need to reset
+            per-job context regardless of any request scope. Defaults to ``"manual"``.
         """  # noqa: E501
         owner = _request_scope_owner.get()
         if owner is not None and scope in ("request", "manual"):

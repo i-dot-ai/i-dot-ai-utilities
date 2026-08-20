@@ -8,7 +8,7 @@ These tests exist to prevent regression of:
   Accepting them would give anyone able to influence Django settings the
   ability to import arbitrary modules and invoke their zero-arg callables
   during middleware boot, code execution at init.
-- Constitution Art. 22: the default logger path MUST NOT call
+- the default logger path MUST NOT call
   ``structlog.configure()`` (directly or transitively). Doing so globally
   reconfigures structlog inside an *observability library*, which is
   widely considered an anti-pattern.
@@ -102,7 +102,7 @@ class _NonConformantLogger:
 
 
 # ---------------------------------------------------------------------------
-# resolve_logger: security finding A4 + general dispatch
+# resolve_logger: dotted-import-string rejection + general dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -287,12 +287,12 @@ class TestBareStructlogAdapter:
 
 
 # ---------------------------------------------------------------------------
-# Default path does not mutate structlog globally (Art. 22)
+# Default path does not mutate structlog globally
 # ---------------------------------------------------------------------------
 
 
 class TestDefaultLoggerDoesNotConfigureStructlog:
-    """Constitution Art. 22: the default ``I_DOT_AI_LOGGER`` fallback path
+    """the default ``I_DOT_AI_LOGGER`` fallback path
     MUST NOT call ``structlog.configure()``. Doing so from inside an
     observability library silently overrides the consumer's own structlog
     setup, an anti-pattern that has bitten us before.

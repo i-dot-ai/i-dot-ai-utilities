@@ -19,7 +19,7 @@ live inside the deleted ``DjangoEnricher``:
   ``LazyObject.__class__`` proxy, so it never forces evaluation) plus an
   identity check against Django's ``empty`` sentinel.
 
-- Art. 46 / resilience: any database-layer exception raised during
+- Resilience: any database-layer exception raised during
   attribute access is surfaced via a WARNING rather than swallowed so
   DB outages remain visible in the very logs that would diagnose them.
   Detection is by MRO class-name match (``DatabaseError`` and

@@ -34,8 +34,8 @@ X_REQUEST_ID: Final[str] = "X-Request-ID"
 
 
 # Header names the middleware MUST refuse to log even when explicitly named
-# in ``I_DOT_AI_LOGGING_HEADER_ALLOWLIST``. Constitution Art. 52 makes this
-# guarantee unconditional, since a misconfigured allowlist is a plausible
+# in ``I_DOT_AI_LOGGING_HEADER_ALLOWLIST``. This guarantee is
+# unconditional, since a misconfigured allowlist is a plausible
 # operational mistake, and a denylist floor keeps the guarantee intact. Match
 # is case-insensitive.
 FORBIDDEN_HEADER_NAMES: Final[frozenset[str]] = frozenset(
@@ -56,7 +56,7 @@ FORBIDDEN_HEADER_NAMES: Final[frozenset[str]] = frozenset(
 # Envoy UUIDs, CloudFront opaque base64 identifiers, and JWT-shaped tokens.
 # Deliberately restrictive: any character outside this class is rejected to
 # prevent log-injection, log-search hijack, and correlation poisoning via
-# attacker-controlled X-Request-ID values (see security finding A3).
+# attacker-controlled X-Request-ID values.
 _REQUEST_ID_CHARSET_RE = re.compile(r"^[A-Za-z0-9._~=:+/\-]+$")
 
 

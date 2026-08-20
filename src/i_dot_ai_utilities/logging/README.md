@@ -182,10 +182,10 @@ HTTP-request attribute extraction (method / path / route / status code / user ag
 
 Trace correlation on log records comes from a structlog processor reading the active span on **every** event (not just the three lifecycle events), so any `logger.info(...)` inside a view automatically gets `trace_id` / `span_id` / `trace_flags`.
 
-**Install** (both optional extras are required):
+**Install** (both optional extras are required). This ships as a pre-release, so pass `--pre` or pin the pre-release version; a plain `pip install` skips pre-releases:
 
 ```
-pip install "i-dot-ai-utilities[django,otel]"
+pip install --pre "i-dot-ai-utilities[django,otel]"
 ```
 
 **Configure OTel once at startup** (`wsgi.py`, `asgi.py`, or an `AppConfig.ready()`):
@@ -272,7 +272,7 @@ All settings are optional. The middleware ships with sensible defaults and uses 
 
 | Setting | Type | Default | Purpose |
 |---|---|---|---|
-| `I_DOT_AI_LOGGER` | logger object \| zero-arg callable | Bare `structlog.get_logger(__name__)` wrapped for the five-method contract | The logger the middleware writes through. **Dotted import strings are NOT accepted** (security finding A4; closes a boot-time arbitrary-import attack surface). Import your logger in `settings.py` and assign it directly, or pass a zero-arg factory. |
+| `I_DOT_AI_LOGGER` | logger object \| zero-arg callable | Bare `structlog.get_logger(__name__)` wrapped for the five-method contract | The logger the middleware writes through. **Dotted import strings are NOT accepted** (closes a boot-time arbitrary-import attack surface). Import your logger in `settings.py` and assign it directly, or pass a zero-arg factory. |
 | `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` | `bool` | `True` | Set to `False` to disable. The middleware then raises `MiddlewareNotUsed` cleanly at startup. |
 | `I_DOT_AI_LOGGING_EXCLUDED_PREFIXES` | iterable of `str` | Health-check prefixes (see below) | Paths whose prefix matches are skipped entirely; no log events. |
 | `I_DOT_AI_LOGGING_EXCLUDED_REGEXES` | iterable of `str` \| `re.Pattern` | `()` | Additional regex-based exclusions, compiled once at startup. |
@@ -311,7 +311,7 @@ I_DOT_AI_LOGGING_HEADER_ALLOWLIST = ("X-Tenant-ID",)
 | `request_completed` | View returned normally, OR raised `Http404` (404 is ordinary traffic, not a failure) | `info` (2xx/3xx), `warning` (4xx incl. `Http404`), `error` (5xx) |
 | `request_failed` | View raised any unhandled exception other than `Http404` | `error` |
 
-Exceptions are logged with full traceback via `logger.exception(...)` then re-raised with a bare `raise`, preserving the original traceback for Sentry / DRF / the debug toolbar. `Http404` is carved out per constitution Art. 46: WARNING, status 404, `request_completed` event name, no traceback (it's a control-flow signal, not a crash).
+Exceptions are logged with full traceback via `logger.exception(...)` then re-raised with a bare `raise`, preserving the original traceback for Sentry / DRF / the debug toolbar. `Http404` is carved out: WARNING, status 404, `request_completed` event name, no traceback (it's a control-flow signal, not a crash).
 
 ### Log record schema
 
@@ -326,7 +326,7 @@ The schema is deliberately narrow. HTTP request context lives on the OTel span, 
 | `http.request.header.*` | middleware | `str` | Only for headers explicitly in `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`; lowercased, hyphens to underscores. Length-capped at 512 chars |
 | `duration_ms` | middleware | `int` | `time.monotonic()` delta, clamped to >= 0 |
 | `request_id` | middleware | `str` | **Always** a fresh per-hop UUID4 hex (32 chars). Distinct from `trace_id` and from any inbound correlation id |
-| `upstream_request_id` | middleware | `str`, optional | Inbound `X-Request-ID` preserved verbatim when present and charset-valid (RFC 3986 unreserved + common base64 chars). Length-capped at 200 chars. Absent when no inbound header or when the inbound value fails charset validation (security finding A3: blocks log-injection via attacker-chosen identifiers) |
+| `upstream_request_id` | middleware | `str`, optional | Inbound `X-Request-ID` preserved verbatim when present and charset-valid (RFC 3986 unreserved + common base64 chars). Length-capped at 200 chars. Absent when no inbound header or when the inbound value fails charset validation (blocks log-injection via attacker-chosen identifiers) |
 | `trace_id` | structlog processor | `str`, optional | 32-hex active trace id; absent outside a span |
 | `span_id` | structlog processor | `str`, optional | 16-hex active span id; absent outside a span |
 | `trace_flags` | structlog processor | `str`, optional | 2-hex active trace flags; absent outside a span |
@@ -343,11 +343,11 @@ If your OpenSearch / Loki dashboards need to filter on any of these, shift those
 
 ### Request-ID semantics
 
-Constitution Art. 32 requires a fresh per-hop `request_id` UUID4, distinct from any inbound correlation value. This middleware honours that contract:
+The middleware mints a fresh per-hop `request_id` UUID4, distinct from any inbound correlation value:
 
 - `request_id` is **always** a freshly generated UUID4 hex, minted at request entry.
 - An inbound `X-Request-ID` header, when present and charset-valid, is preserved verbatim in a separate `upstream_request_id` field (length-capped at 200 chars). The two fields never collide.
-- Charset-invalid inbound values (whitespace, control characters, quoting characters) are rejected silently; the `upstream_request_id` field is simply omitted. This is security finding A3: accepting an attacker-chosen `X-Request-ID` verbatim into log context enables log-injection and log-search hijack.
+- Charset-invalid inbound values (whitespace, control characters, quoting characters) are rejected silently; the `upstream_request_id` field is simply omitted. Accepting an attacker-chosen `X-Request-ID` verbatim into log context enables log-injection and log-search hijack.
 - `X-Request-ID` is NEVER used as the trace id or fed to the OTel propagator. Trace context comes from `traceparent` / `X-Amzn-Trace-Id` via the composite propagator.
 
 ### Trace-header handling
@@ -400,7 +400,7 @@ Ordering matters:
 
 The middleware lifts the hardening that used to live inside the deleted `DjangoEnricher`:
 
-- **No database query from an unhydrated `SimpleLazyObject`** (security finding FI-5). Django's auth middleware assigns a `SimpleLazyObject` to `request.user`; touching `.pk` before it hydrates triggers a `User.objects.get(...)` query. Observability code must never issue such a query, since it masks database outages from the very logs that would diagnose them. The middleware detects the unhydrated state structurally (`_wrapped` sentinel) without forcing evaluation.
+- **No database query from an unhydrated `SimpleLazyObject`**. Django's auth middleware assigns a `SimpleLazyObject` to `request.user`; touching `.pk` before it hydrates triggers a `User.objects.get(...)` query. Observability code must never issue such a query, since it masks database outages from the very logs that would diagnose them. The middleware detects the unhydrated state structurally (`_wrapped` sentinel) without forcing evaluation.
 - **Database errors surface as WARNINGs**, not silent drops. If reading `request.user.is_authenticated` or `request.user.pk` raises a Django `DatabaseError` / `OperationalError` / `InterfaceError` / `ProgrammingError` / `IntegrityError`, the middleware emits a WARNING naming the failing access and continues; the request is unaffected but operators see the outage.
 - Anonymous users produce no `user.id` field at all (not a falsy value), so `has(user.id)` queries discriminate cleanly.
 - The OTel `enduser.*` namespace was deprecated in v1.24; only the opaque primary key is emitted, never email / username / other PII.

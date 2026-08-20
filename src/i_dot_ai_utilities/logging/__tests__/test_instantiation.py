@@ -190,7 +190,7 @@ def test_log_name_set(capsys):
 
 
 # ---------------------------------------------------------------------------
-# Request-scope ownership (security finding: residual flaw)
+# Request-scope ownership
 # ---------------------------------------------------------------------------
 
 

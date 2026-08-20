@@ -109,7 +109,7 @@ def _clear_exporter():
 
 @pytest.fixture(autouse=True)
 def _clear_structlog_contextvars():
-    """Art. 57: ensure no structlog context bleeds between tests."""
+    """ensure no structlog context bleeds between tests."""
     structlog.contextvars.clear_contextvars()
     yield
     structlog.contextvars.clear_contextvars()
@@ -463,7 +463,7 @@ class TestHeaderAllowlist:
 
 
 class TestRequestId:
-    """Constitution Art. 30 + 32: ``request_id`` is ALWAYS a fresh per-hop
+    """``request_id`` is ALWAYS a fresh per-hop
     UUID4, distinct from any inbound correlation value. Any valid inbound
     ``X-Request-ID`` is preserved verbatim as ``upstream_request_id``.
     Charset-invalid or absent inbound values produce no
@@ -596,12 +596,12 @@ class TestEnablementFlag:
 
 
 # ---------------------------------------------------------------------------
-# Http404 carve-out (Art. 46)
+# Http404 carve-out
 # ---------------------------------------------------------------------------
 
 
 class TestHttp404CarveOut:
-    """Constitution Art. 46: ``Http404`` MUST be logged at INFO or WARNING,
+    """``Http404`` MUST be logged at INFO or WARNING,
     never ERROR. Treated as ordinary traffic (``request_completed``), not a
     server-side failure (``request_failed``).
     """
@@ -631,7 +631,7 @@ class TestHttp404CarveOut:
         assert completed[0]["error.type"] == "404"
 
     def test_http404_reraised_after_logging(self, rf, logger, settings_sandbox):
-        """Art. 43: exception MUST be re-raised so Django's error path
+        """exception MUST be re-raised so Django's error path
         (404 handler, debug toolbar) still sees it.
         """
         settings_sandbox(I_DOT_AI_LOGGER=logger)
@@ -645,7 +645,7 @@ class TestHttp404CarveOut:
 
 
 # ---------------------------------------------------------------------------
-# `error.type` semconv field (Art. 50)
+# `error.type` semconv field
 # ---------------------------------------------------------------------------
 
 
@@ -700,7 +700,7 @@ class TestErrorType:
 
 
 # ---------------------------------------------------------------------------
-# Finally-based emission idempotency (Art. 40, 47)
+# Finally-based emission idempotency
 # ---------------------------------------------------------------------------
 
 
@@ -749,7 +749,7 @@ class TestEmissionIdempotency:
 
 
 # ---------------------------------------------------------------------------
-# Schema version (Art. 51)
+# Schema version
 # ---------------------------------------------------------------------------
 
 
@@ -790,7 +790,7 @@ class TestSchemaVersion:
 
 
 # ---------------------------------------------------------------------------
-# Settings validation (Art. 15)
+# Settings validation
 # ---------------------------------------------------------------------------
 
 
@@ -841,7 +841,7 @@ class TestSettingsValidation:
 
 
 # ---------------------------------------------------------------------------
-# Forbidden header rejection warning (Art. 53)
+# Forbidden header rejection warning
 # ---------------------------------------------------------------------------
 
 
@@ -879,12 +879,12 @@ class TestForbiddenHeaderRejectionWarning:
 
 
 # ---------------------------------------------------------------------------
-# Trace-context precedence via OTel propagator (Art. 60)
+# Trace-context precedence via OTel propagator
 # ---------------------------------------------------------------------------
 
 
 class TestTraceContextPrecedence:
-    """Art. 60: the ``trace_id`` precedence ladder MUST have a dedicated
+    """the ``trace_id`` precedence ladder MUST have a dedicated
     test. With the OTel middleware, precedence is delegated to the
     composite propagator (W3C + X-Ray), where W3C wins when both are
     present. We verify via the span attached to the recorded server span,
@@ -987,7 +987,7 @@ class TestTraceContextPrecedence:
 
 
 # ---------------------------------------------------------------------------
-# Process-exception hook contract (Art. 45)
+# Process-exception hook contract
 # ---------------------------------------------------------------------------
 
 
@@ -1005,7 +1005,7 @@ class TestProcessExceptionSafety:
 
 
 # ---------------------------------------------------------------------------
-# Middleware-surface contract (Art. 1, 2)
+# Middleware-surface contract
 # ---------------------------------------------------------------------------
 
 

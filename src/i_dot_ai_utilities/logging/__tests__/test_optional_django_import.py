@@ -1,7 +1,7 @@
 # mypy: disable-error-code="no-untyped-def"
 """Tests verifying the library's soft-Django-dependency contract.
 
-The constitution requires that:
+The optional-import contract requires that:
 
 - ``i_dot_ai_utilities.logging`` and ``i_dot_ai_utilities.logging.middleware``
   are importable in an environment without Django.
