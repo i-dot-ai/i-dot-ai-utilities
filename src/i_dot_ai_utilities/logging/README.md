@@ -182,10 +182,10 @@ HTTP-request attribute extraction (method / path / route / status code / user ag
 
 Trace correlation on log records comes from a structlog processor reading the active span on **every** event (not just the three lifecycle events), so any `logger.info(...)` inside a view automatically gets `trace_id` / `span_id` / `trace_flags`.
 
-**Install** (both optional extras are required). This ships as a pre-release, so pass `--pre` or pin the pre-release version; a plain `pip install` skips pre-releases:
+**Install** (`otel_django` brings the OTel bootstrap and Django auto-instrumentation; `django` brings Django itself and the middleware). This ships as a pre-release, so pass `--pre` or pin the pre-release version; a plain `pip install` skips pre-releases:
 
 ```
-pip install --pre "i-dot-ai-utilities[django,otel]"
+pip install --pre "i-dot-ai-utilities[django,otel_django]"
 ```
 
 > **Pre-release channels:** this OTel/Django functionality is opt-in and only compatible with our new observability stack — not the existing one. The command above works when the pre-release was published to **production PyPI**. If it was published to **Test PyPI** instead, `--pre` alone is not enough: you must also point the installer at Test PyPI (with a production fallback index for dependencies) and pin the exact timestamped version. See [CI/CD & Releases](../../../README.md#cicd--releases) in the root README for the full per-channel install commands.

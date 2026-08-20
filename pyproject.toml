@@ -77,27 +77,38 @@ litellm = [
 # Metrics module - No additional dependencies beyond logging
 metrics = []
 
-# Django module - Adds Django integration (DjangoUserIdMiddleware). The
-# Django middleware that handles request lifecycle logging
-# (StructuredLoggingMiddlewareOTel) lives under the [otel] extra; install
-# both extras together: `pip install "i-dot-ai-utilities[django,otel]"`.
+# Django module - Adds Django itself, needed by StructuredLoggingMiddlewareOTel
+# and DjangoUserIdMiddleware (both import real Django). Pair it with the
+# [otel_django] extra for the OTel bootstrap and auto-instrumentation:
+# `pip install "i-dot-ai-utilities[django,otel_django]"`.
 django = [
     "django>=4.2,<6.0",
 ]
 
-# OTel module - OpenTelemetry bootstrap (configure_otel), Django/FastAPI
-# auto-instrumentation, X-Ray ID generator + composite propagator, and
-# StructuredLoggingMiddlewareOTel. Install [django] and/or FastAPI deps
-# alongside as needed. See src/i_dot_ai_utilities/logging/README.md.
+# OTel core - framework-agnostic bootstrap (configure_otel): traces, metrics,
+# OTLP export, and W3C + AWS X-Ray propagation. Add a framework extra
+# (otel_django / otel_fastapi) to auto-instrument that framework, so a
+# consumer only pulls the instrumentation it actually uses.
+# See src/i_dot_ai_utilities/logging/README.md.
 otel = [
     "opentelemetry-api>=1.27",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp-proto-http>=1.27",
-    "opentelemetry-instrumentation-django>=0.48b0",
-    "opentelemetry-instrumentation-fastapi>=0.48b0",
-    "opentelemetry-instrumentation-asgi>=0.48b0",
     "opentelemetry-propagator-aws-xray>=1.0.1",
     "opentelemetry-sdk-extension-aws>=2.0.0",
+]
+
+# Django auto-instrumentation for configure_otel_for_django. Pair with the
+# [django] extra for Django itself and StructuredLoggingMiddlewareOTel.
+otel_django = [
+    "i-dot-ai-utilities[otel]",
+    "opentelemetry-instrumentation-django>=0.48b0",
+]
+
+# FastAPI auto-instrumentation for configure_otel_for_fastapi.
+otel_fastapi = [
+    "i-dot-ai-utilities[otel]",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
 ]
 
 # Install all optional modules
@@ -105,7 +116,7 @@ all = [
     "boto3>=1.40.41",
     "boto3-stubs[s3]>=1.40.41",
     "minio>=7.2.15",
-    "litellm>=1.77.1",
+    "litellm==1.79.0",
     "requests>=2.32.3",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
@@ -120,7 +131,6 @@ all = [
     "opentelemetry-exporter-otlp-proto-http>=1.27",
     "opentelemetry-instrumentation-django>=0.48b0",
     "opentelemetry-instrumentation-fastapi>=0.48b0",
-    "opentelemetry-instrumentation-asgi>=0.48b0",
     "opentelemetry-propagator-aws-xray>=1.0.1",
     "opentelemetry-sdk-extension-aws>=2.0.0",
 ]
@@ -222,18 +232,14 @@ dev = [
     "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
-    # OTel packages duplicate the `[otel]` optional-extra list intentionally
-    # so `uv sync` (dev group) alone is sufficient to run the full test
-    # suite. Without these, the OTel-backed middleware tests silently skip
-    # via `pytest.importorskip("opentelemetry")`, making `pytest --cov`
-    # look catastrophically low (see inclusion rationale in commit
-    # history). No production-consumer impact — only the dev group.
+    # Mirrors the otel extras (core + both framework instrumentations) so
+    # `uv sync` alone runs the full suite; without them the OTel middleware
+    # tests skip via `pytest.importorskip` and coverage reads far too low.
     "opentelemetry-api>=1.27",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp-proto-http>=1.27",
     "opentelemetry-instrumentation-django>=0.48b0",
     "opentelemetry-instrumentation-fastapi>=0.48b0",
-    "opentelemetry-instrumentation-asgi>=0.48b0",
     "opentelemetry-propagator-aws-xray>=1.0.1",
     "opentelemetry-sdk-extension-aws>=2.0.0",
     "fastapi>=0.115",

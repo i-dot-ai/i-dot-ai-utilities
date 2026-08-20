@@ -12,6 +12,8 @@ When installing the package, the base package comes with only the `logger` modul
 - litellm
 - metrics
 - otel _(pre-release)_
+- otel_django _(pre-release)_
+- otel_fastapi _(pre-release)_
 - django _(pre-release)_
 - all
 
@@ -27,7 +29,7 @@ uv pip install "i-dot-ai-utilities[all]"
 
 Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
 
-> ⚠️ **The `otel` and `django` extras are pre-release, use with caution.** They're compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pass `--pre` (or pin the pre-release version) to install them; a plain `pip install` won't pull a pre-release. `[all]` pulls them in too, so it also needs `--pre` during the pre-release window.
+> ⚠️ **The `otel`, `otel_django`, `otel_fastapi`, and `django` extras are pre-release, use with caution.** They're compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pass `--pre` (or pin the pre-release version) to install them; a plain `pip install` won't pull a pre-release. `[all]` pulls them in too, so it also needs `--pre` during the pre-release window.
 
 ## Features
 
@@ -69,9 +71,9 @@ More information on usage and setup can be found in the [litellm library readme]
 
 #### OpenTelemetry & Django middleware
 
-The `otel` extra adds an OpenTelemetry bootstrap (`configure_otel` and the framework helpers `configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and an optional structlog log bridge to an OTLP endpoint, with W3C + AWS X-Ray propagation.
+The `otel` extra adds a framework-agnostic OpenTelemetry bootstrap (`configure_otel` and the framework helpers `configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and an optional structlog log bridge to an OTLP endpoint, with W3C + AWS X-Ray propagation. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation, so you only pull the instrumentation you actually use.
 
-The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution.
+The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app wanting the full stack, install `[django,otel_django]`.
 
 > ⚠️ **Pre-release, use with caution** (see the [Installation](#installation) note): compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack.
 
@@ -115,22 +117,22 @@ Notes:
 
 ```bash
 # opt in to pre-releases (resolves the newest rc)
-pip install --pre "i-dot-ai-utilities[django,otel]"
+pip install --pre "i-dot-ai-utilities[django,otel_django]"
 
 # or pin the exact pre-release version
-pip install "i-dot-ai-utilities[django,otel]==0.6.0rc1"
+pip install "i-dot-ai-utilities[django,otel_django]==0.6.0rc1"
 ```
 
 **From Test PyPI** (pre-release → test channel): point your installer at Test PyPI, provide production PyPI as a fallback index so runtime dependencies resolve, and pin the exact **timestamped** version the workflow generated (replace the version as required):
 
 ```bash
-uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[django,otel]==0.1.1rc202506301522"
+uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
 ```
 
 Or with pip:
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[django,otel]==0.1.1rc202506301522"
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
 ```
 
 `--pre` alone is not enough for the Test PyPI channel: the package only exists on Test PyPI, so you must also point the installer at that index (and keep production PyPI as a fallback for dependencies).
