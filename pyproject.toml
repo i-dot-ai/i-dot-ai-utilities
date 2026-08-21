@@ -77,12 +77,46 @@ litellm = [
 # Metrics module - No additional dependencies beyond logging
 metrics = []
 
+# Django module - Adds Django itself, needed by StructuredLoggingMiddlewareOTel
+# and DjangoUserIdMiddleware (both import real Django). Pair it with the
+# [otel_django] extra for the OTel bootstrap and auto-instrumentation:
+# `pip install "i-dot-ai-utilities[django,otel_django]"`.
+django = [
+    "django>=4.2,<6.0",
+]
+
+# OTel core - framework-agnostic bootstrap (configure_otel): traces, metrics,
+# OTLP export, and W3C + AWS X-Ray propagation. Add a framework extra
+# (otel_django / otel_fastapi) to auto-instrument that framework, so a
+# consumer only pulls the instrumentation it actually uses.
+# See src/i_dot_ai_utilities/logging/README.md.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+    "opentelemetry-sdk-extension-aws>=2.0.0",
+]
+
+# Django auto-instrumentation for configure_otel_for_django. Pair with the
+# [django] extra for Django itself and StructuredLoggingMiddlewareOTel.
+otel_django = [
+    "i-dot-ai-utilities[otel]",
+    "opentelemetry-instrumentation-django>=0.48b0",
+]
+
+# FastAPI auto-instrumentation for configure_otel_for_fastapi.
+otel_fastapi = [
+    "i-dot-ai-utilities[otel]",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+]
+
 # Install all optional modules
 all = [
     "boto3>=1.40.41",
     "boto3-stubs[s3]>=1.40.41",
     "minio>=7.2.15",
-    "litellm>=1.77.1",
+    "litellm==1.79.0",
     "requests>=2.32.3",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
@@ -90,6 +124,15 @@ all = [
     "google-cloud-storage>=3.3.1",
     "azure-core>=1.35.1",
     "azure-storage-blob>=12.26.0",
+    "grpcio-status>=1.76.0",
+    "django>=4.2,<6.0",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+    "opentelemetry-sdk-extension-aws>=2.0.0",
 ]
 
 [tool.mypy]
@@ -179,6 +222,7 @@ line-ending = "auto"
 [dependency-groups]
 dev = [
     "bandit>=1.8.3",
+    "django>=4.2,<6.0",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
@@ -188,6 +232,18 @@ dev = [
     "types-requests>=2.32.4.20250913",
     "types-setuptools>=80.9.0.20250529",
     "types-urllib3>=1.26.25.14",
+    # Mirrors the otel extras (core + both framework instrumentations) so
+    # `uv sync` alone runs the full suite; without them the OTel middleware
+    # tests skip via `pytest.importorskip` and coverage reads far too low.
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-django>=0.48b0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-propagator-aws-xray>=1.0.1",
+    "opentelemetry-sdk-extension-aws>=2.0.0",
+    "fastapi>=0.115",
+    "httpx>=0.27",
 ]
 
 [tool.hatch.build]
@@ -206,5 +262,8 @@ filterwarnings = [
     "ignore::UserWarning:pydantic.*",
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
     "ignore:.*Expected.*fields but got.*:UserWarning",
-    "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20"
+    "ignore:.*The `dict` method is deprecated.*:pydantic.warnings.PydanticDeprecatedSince20",
+    # The OTel SDK's own API->SDK LogRecord conversion re-passes trace_id/span_id
+    # positionally and trips its deprecation warning, even when callers use `context`.
+    "ignore:LogRecord init with .*is deprecated:UserWarning:opentelemetry.sdk._logs._internal"
 ]

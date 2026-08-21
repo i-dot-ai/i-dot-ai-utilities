@@ -5,6 +5,19 @@ on:
     types:
       - released
       - prereleased
+  workflow_dispatch:
+    inputs:
+      pypi:
+        description: "Target index. Manual runs are pre-release only."
+        type: choice
+        options:
+          - production
+          - test
+        default: test
+      version:
+        description: "Existing tag to publish (must already exist, e.g. 0.6.0rc1)."
+        type: string
+        required: true
 
 jobs:
   deploy:
@@ -13,29 +26,98 @@ jobs:
     permissions:
         id-token: write
         contents: read
+    outputs:
+      target: ${{ steps.resolve.outputs.target }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      maturity: ${{ steps.resolve.outputs.maturity }}
     steps:
+    - name: Resolve release target
+      id: resolve
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        INPUT_PYPI: ${{ inputs.pypi }}
+        INPUT_VERSION: ${{ inputs.version }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+      run: |
+        set -euo pipefail
+
+        # A PEP 440 pre-release carries an a/b/rc/.dev suffix on the base
+        # X.Y.Z version (case-insensitive). Stable versions do not.
+        is_prerelease() {
+          printf '%s' "$1" | grep -Eiq '^[0-9]+\.[0-9]+\.[0-9]+(rc|a|b|\.dev)'
+        }
+
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          target="$INPUT_PYPI"
+          tag="$INPUT_VERSION"
+
+          if is_prerelease "$tag"; then
+            maturity="prerelease"
+          else
+            maturity="stable"
+          fi
+
+          # Guardrail: manual dispatch is pre-release only. A stable version
+          # must go through the normal GitHub Release flow, never a manual
+          # publish, to avoid two divergent routes to a production stable
+          # release.
+          if [ "$target" = "production" ] && [ "$maturity" != "prerelease" ]; then
+            echo "::error::Manual dispatch to production is pre-release only. '$tag' is not a PEP 440 pre-release (expected an rc/a/b/.dev suffix). Cut a stable release via the GitHub Release flow instead."
+            exit 1
+          fi
+        else
+          # GitHub Release event: keep today's routing. A GitHub pre-release
+          # goes to Test PyPI; a full release goes to production PyPI.
+          tag="$RELEASE_TAG"
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            target="test"
+            maturity="prerelease"
+          else
+            target="production"
+            maturity="stable"
+          fi
+        fi
+
+        # Version-string stamping (see README CI/CD & Releases):
+        # - test:                  <tag>.<timestamp>  (avoids Test PyPI
+        #                          filename-reuse rejections on re-upload)
+        # - production pre-release: <tag> verbatim     (clean PEP 440 rc so
+        #                          pip ignores it without --pre)
+        # - production stable:      <tag> verbatim
+        if [ "$target" = "test" ]; then
+          timestamp="$(date +"%Y%m%d%H%M")"
+          version="${tag}.${timestamp}"
+        else
+          version="$tag"
+        fi
+
+        {
+          echo "target=$target"
+          echo "tag=$tag"
+          echo "version=$version"
+          echo "maturity=$maturity"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Resolved: event=$EVENT_NAME target=$target maturity=$maturity tag=$tag version=$version"
+
     - name: Validate semantic version
       uses: matt-usurp/validate-semver@7bbc9584679de1aeef57aa531504ab00438481ab
       with:
-        version: ${{ github.event.release.tag_name }}
+        version: ${{ steps.resolve.outputs.tag }}
 
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
           fetch-depth: 0
+          ref: ${{ steps.resolve.outputs.tag }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v4
 
-    - name: Set test release version
-      if: github.event.release.prerelease == true
-      run: |
-        timestamp=$(date +"%Y%m%d%H%M")
-        uv version ${{ github.event.release.tag_name }}.$timestamp
-
-    - name: Set prod release version
-      if: github.event.release.prerelease == false
-      run: uv version ${{ github.event.release.tag_name }}
+    - name: Set package version
+      run: uv version ${{ steps.resolve.outputs.version }}
 
     - name: Install dependencies
       run: uv sync
@@ -43,16 +125,16 @@ jobs:
     - name: Build
       run: uv build
 
-    - name: Publish to test pypi
+    - name: Publish to test PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      if: github.event.release.prerelease == true
+      if: steps.resolve.outputs.target == 'test'
       with:
         repository-url: 'https://test.pypi.org/legacy/'
         verbose: true
 
-    - name: Publish to prod pypi
+    - name: Publish to production PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      if: github.event.release.prerelease == false
+      if: steps.resolve.outputs.target == 'production'
 
   determine-success:
     if: always()
@@ -78,7 +160,7 @@ jobs:
       - determine-success
     with:
       WORKFLOW_PASSED: ${{ needs.determine-success.outputs.success == 'true' }}
-      SUCCESS_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":airplane: ${{ github.repository }} - Successfully deployed ${{ github.event.release.tag_name }}${{ github.event.release.prerelease && ' (Pre-Release)' || '' }} :large_green_circle:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Package published to${{ github.event.release.prerelease && ' test' || '' }} PyPI successfully\"}}]}"
-      FAILURE_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":x: ${{ github.repository }} - Failed to deploy ${{ github.event.release.tag_name }}${{ github.event.release.prerelease && ' (Pre-Release)' || '' }} :x:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Failed to publish package to PyPI\"}}]}"
+      SUCCESS_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":airplane: ${{ github.repository }} - Successfully deployed ${{ needs.deploy.outputs.tag }}${{ needs.deploy.outputs.maturity == 'prerelease' && (needs.deploy.outputs.target == 'production' && ' (Pre-Release → production PyPI)' || ' (Pre-Release → test PyPI)') || '' }} :large_green_circle:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Package published to ${{ needs.deploy.outputs.target == 'test' && 'test' || 'production' }} PyPI successfully\"}}]}"
+      FAILURE_PAYLOAD: "{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\":x: ${{ github.repository }} - Failed to deploy ${{ needs.deploy.outputs.tag || github.event.release.tag_name || inputs.version }}${{ needs.deploy.outputs.maturity == 'prerelease' && (needs.deploy.outputs.target == 'production' && ' (Pre-Release → production PyPI)' || ' (Pre-Release → test PyPI)') || '' }} :x:\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Failed to publish package to PyPI\"}}]}"
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -11,6 +11,10 @@ When installing the package, the base package comes with only the `logger` modul
 - file_store
 - litellm
 - metrics
+- otel _(pre-release)_
+- otel_django _(pre-release)_
+- otel_fastapi _(pre-release)_
+- django _(pre-release)_
 - all
 
 To install the package, use your package manager of choice:
@@ -24,6 +28,8 @@ uv pip install "i-dot-ai-utilities[all]"
 ```
 
 Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
+
+> ⚠️ **The `otel`, `otel_django`, `otel_fastapi`, and `django` extras are pre-release, use with caution.** They're compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pass `--pre` (or pin the pre-release version) to install them; a plain `pip install` won't pull a pre-release. `[all]` pulls them in too, so it also needs `--pre` during the pre-release window.
 
 ## Features
 
@@ -63,16 +69,20 @@ As the end-user, you'll have to make sure that the API key issued to you by Lite
 
 More information on usage and setup can be found in the [litellm library readme](./src/i_dot_ai_utilities/litellm/README.md).
 
+#### OpenTelemetry & Django middleware
+
+The `otel` extra adds a framework-agnostic OpenTelemetry bootstrap (`configure_otel` and the framework helpers `configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and an optional structlog log bridge to an OTLP endpoint, with W3C + AWS X-Ray propagation. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation, so you only pull the instrumentation you actually use.
+
+The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app wanting the full stack, install `[django,otel_django]`.
+
+> ⚠️ **Pre-release, use with caution** (see the [Installation](#installation) note): compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack.
+
+You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+
 ### Future features:
 
-- authentication
 - authorisation
 - vector stores
-
-## Settings
-
-This is where some of the above can be found:
-
 
 ## How to use
 
@@ -86,24 +96,46 @@ When making changes or adding tests, please ensure tests run in isolation, as fa
 
 ### CI/CD & Releases
 
-Releases must be manually created, after which the specified package version will be released to PyPI. As such, release names must adhere to semantic versioning. They must *not* be prefixed with a `v`.
+Package versions are published to PyPI by the `Publish python package` workflow. Version names must adhere to semantic versioning and must *not* be prefixed with a `v`. Merging to `main` does **not** publish anything; publishing is always a deliberate action.
 
-You may release a pre-release tag to the test version of PyPI by specifying the release as a pre-release on creation. This allows for the testing of a tag in a safe environment before merging to main.
+There are three publish channels:
 
-To test a pre-release tag, you can follow these steps in a repo of your choice:
-1. Update pyproject.toml:
-```
-[[tool.poetry.source]]
-name = "test-pypi"
-url = "https://test.pypi.org/simple/"
-priority = "supplemental"
-```
-2. Load the specific version into the environment (replacing version number as required)
-```
-poetry add --source test-pypi i-dot-ai-utilities==0.1.1rc202506301522
+| Channel | How to trigger | Version stamped | Published to |
+|---|---|---|---|
+| **Stable release** | Create a GitHub Release, **not** marked as a pre-release | bare tag (e.g. `0.6.0`) | production PyPI |
+| **Pre-release → production** | Run the workflow manually (`Actions → Publish python package → Run workflow`) with `pypi=production` and an existing pre-release tag | tag verbatim (e.g. `0.6.0rc1`) | production PyPI |
+| **Pre-release → test** | Create a GitHub Release, marked as a pre-release | `<tag>.<timestamp>` | Test PyPI |
+
+Notes:
+
+- **Manual dispatch is pre-release only.** The workflow rejects a manual `production` publish whose version is not a PEP 440 pre-release (an `rc` / `a` / `b` / `.dev` suffix). Cut stable releases through the GitHub Release flow.
+- **The tag must already exist before a manual dispatch.** The workflow checks out the tag you pass; create and push it first.
+
+#### Installing a pre-release
+
+**From production PyPI** (pre-release → production channel): pip will not resolve a PEP 440 pre-release unless you opt in with `--pre` or pin the exact version, so ordinary consumers stay on the latest stable automatically.
+
+```bash
+# opt in to pre-releases (resolves the newest rc)
+pip install --pre "i-dot-ai-utilities[django,otel_django]"
+
+# or pin the exact pre-release version
+pip install "i-dot-ai-utilities[django,otel_django]==0.6.0rc1"
 ```
 
+**From Test PyPI** (pre-release → test channel): point your installer at Test PyPI, provide production PyPI as a fallback index so runtime dependencies resolve, and pin the exact **timestamped** version the workflow generated (replace the version as required):
 
+```bash
+uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
+```
+
+Or with pip:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
+```
+
+`--pre` alone is not enough for the Test PyPI channel: the package only exists on Test PyPI, so you must also point the installer at that index (and keep production PyPI as a fallback for dependencies).
 
 ## Licence
 
