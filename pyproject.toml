@@ -28,6 +28,7 @@ classifiers = [
 
 # Default dependencies - only includes logging module dependencies
 dependencies = [
+    "httpx>=0.28.1",
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
     "structlog>=25.4.0",
@@ -44,6 +45,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.12.2",
     "mypy>=1.15.0",
+    "pytest-asyncio>=1.0.0",
 ]
 
 # Auth module - Adds HTTP request capabilities
@@ -256,6 +258,8 @@ exclude = [
 packages = ["src/i_dot_ai_utilities"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "error",
     "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth",

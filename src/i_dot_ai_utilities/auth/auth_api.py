@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 import requests
 from pydantic import BaseModel, field_validator
 
@@ -49,6 +50,24 @@ class AuthApiClient:
         self._logger = logger
         self._timeout = timeout
 
+    def _process_response_payload(self, response_data: dict[str, Any]) -> UserAuthorisationResult:
+        """Common to process response .json()."""
+
+        model = AuthApiResponse.model_validate(response_data)
+
+        self._logger.debug(
+            "Auth API decision for {user}. Authorised: {is_authorised}. Reason: {auth_reason}",
+            user=model.metadata.user_email,
+            is_authorised=model.decision.is_authorised,
+            auth_reason=model.decision.auth_reason,
+        )
+
+        return UserAuthorisationResult(
+            email=model.metadata.user_email,
+            is_authorised=model.decision.is_authorised,
+            auth_reason=model.decision.auth_reason,
+        )
+
     def get_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
         try:
             endpoint = self._auth_api_url + "/tokens/authorise"
@@ -60,27 +79,36 @@ class AuthApiClient:
                 "token": token,
             }
 
-            response = requests.post(endpoint, json=payload, timeout=self._timeout)
+            response: requests.Response = requests.post(endpoint, json=payload, timeout=self._timeout)
 
             if not response.ok:
                 response.raise_for_status()
 
-            data = response.json()
+            return self._process_response_payload(response.json())
+        except Exception as e:
+            self._logger.exception("Auth API request failed")
+            raise AuthApiRequestError from e
 
-            model = AuthApiResponse.model_validate(data)
+    async def aget_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
+        """
+        The async version of the above.
+        """
+        try:
+            endpoint = self._auth_api_url + "/tokens/authorise"
 
-            self._logger.debug(
-                "Auth API decision for {user}. Authorised: {is_authorised}. Reason: {auth_reason}",
-                user=model.metadata.user_email,
-                is_authorised=model.decision.is_authorised,
-                auth_reason=model.decision.auth_reason,
-            )
+            self._logger.debug("Calling auth api at {url}", url=endpoint)
 
-            return UserAuthorisationResult(
-                email=model.metadata.user_email,
-                is_authorised=model.decision.is_authorised,
-                auth_reason=model.decision.auth_reason,
-            )
+            payload = {
+                "app_name": self._app_name,
+                "token": token,
+            }
+
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response: httpx.Response = await client.post(endpoint, json=payload)
+
+            response.raise_for_status()
+            return self._process_response_payload(response.json())
+
         except Exception as e:
             self._logger.exception("Auth API request failed")
             raise AuthApiRequestError from e
