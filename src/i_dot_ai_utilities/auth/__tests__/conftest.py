@@ -59,14 +59,10 @@ def get_mock_httpx_response(authed: bool, is_errored: bool = False) -> Mock:
     return mock_response
 
 
-def get_mock_async_client(mock_response: httpx.Response) -> tuple[Mock, Mock]:
-    """Stand in for `httpx.AsyncClient`, which the async path uses as a context manager."""
+def get_mock_async_client(mock_response: httpx.Response) -> Mock:
+    """Stand in for the caller-supplied, long-lived `httpx.AsyncClient` the async path requires."""
 
-    mock_client = Mock()
+    mock_client = Mock(spec=httpx.AsyncClient)
     mock_client.post = AsyncMock(return_value=mock_response)
 
-    mock_client_factory = Mock()
-    mock_client_factory.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client_factory.return_value.__aexit__ = AsyncMock(return_value=None)
-
-    return mock_client_factory, mock_client
+    return mock_client

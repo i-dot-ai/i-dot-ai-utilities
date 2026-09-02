@@ -1160,7 +1160,6 @@ name = "i-dot-ai-utilities"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "structlog" },
@@ -1191,6 +1190,7 @@ all = [
     { name = "requests" },
 ]
 auth = [
+    { name = "httpx" },
     { name = "requests" },
 ]
 dev = [
@@ -1262,6 +1262,7 @@ dev = [
     { name = "opentelemetry-sdk-extension-aws" },
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "starlette" },
@@ -1288,7 +1289,7 @@ requires-dist = [
     { name = "google-cloud-storage", marker = "extra == 'file-store'", specifier = ">=3.3.1" },
     { name = "grpcio-status", marker = "extra == 'all'", specifier = ">=1.76.0" },
     { name = "grpcio-status", marker = "extra == 'file-store'", specifier = ">=1.76.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "httpx", marker = "extra == 'auth'", specifier = ">=0.28.1" },
     { name = "i-dot-ai-utilities", extras = ["otel"], marker = "extra == 'otel-django'" },
     { name = "i-dot-ai-utilities", extras = ["otel"], marker = "extra == 'otel-fastapi'" },
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.4.0" },
@@ -1347,6 +1348,7 @@ dev = [
     { name = "opentelemetry-sdk-extension-aws", specifier = ">=2.0.0" },
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
     { name = "pytest-cov", specifier = ">=6.1.1" },
     { name = "ruff", specifier = ">=0.11.7" },
     { name = "starlette", specifier = ">=0.47.0" },

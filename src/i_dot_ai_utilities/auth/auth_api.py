@@ -5,7 +5,7 @@ import requests
 from pydantic import BaseModel, field_validator
 
 from i_dot_ai_utilities.auth.auth_reason import AuthReason
-from i_dot_ai_utilities.auth.exceptions import AuthApiRequestError
+from i_dot_ai_utilities.auth.exceptions import AuthApiConfigurationError, AuthApiRequestError
 from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 
 
@@ -43,12 +43,28 @@ class AuthApiClient:
     _auth_api_url: str
     _logger: StructuredLogger
     _timeout: int
+    _async_client: httpx.AsyncClient | None
 
-    def __init__(self, app_name: str, auth_api_url: str, logger: StructuredLogger, timeout: int = 3):
+    def __init__(
+        self,
+        app_name: str,
+        auth_api_url: str,
+        logger: StructuredLogger,
+        timeout: int = 3,
+        async_client: httpx.AsyncClient | None = None,
+    ):
+        """
+        Args:
+            async_client:
+                An optional long-lived `httpx.AsyncClient` for the async path to reuse.
+                If left unset, only the sync path is usable: `aget_user_authorisation_info`
+                raises `AuthApiConfigurationError`.
+        """
         self._app_name = app_name
         self._auth_api_url = auth_api_url
         self._logger = logger
         self._timeout = timeout
+        self._async_client = async_client
 
     def _process_response_payload(self, response_data: dict[str, Any]) -> UserAuthorisationResult:
         """Common to process response .json()."""
@@ -91,8 +107,16 @@ class AuthApiClient:
 
     async def aget_user_authorisation_info(self, token: str) -> UserAuthorisationResult:
         """
-        The async version of the above.
+        Requires the `async_client` given to the constructor, whose connection pool stays warm
+        between calls.
+
+        Raises:
+            AuthApiConfigurationError: If the client was constructed without an `async_client`.
         """
+        if not self._async_client:
+            msg = "aget_user_authorisation_info requires an async_client to be passed to AuthApiClient."
+            raise AuthApiConfigurationError(msg)
+
         try:
             endpoint = self._auth_api_url + "/tokens/authorise"
 
@@ -103,8 +127,7 @@ class AuthApiClient:
                 "token": token,
             }
 
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response: httpx.Response = await client.post(endpoint, json=payload)
+            response: httpx.Response = await self._async_client.post(endpoint, json=payload)
 
             response.raise_for_status()
             return self._process_response_payload(response.json())
