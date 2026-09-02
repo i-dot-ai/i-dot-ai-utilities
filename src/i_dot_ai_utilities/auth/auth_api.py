@@ -55,8 +55,21 @@ class AuthApiClient:
     ):
         """
         Args:
+            app_name:
+                The name this app is registered under with the auth API. Sent as `app_name` in
+                the request, and the decision is scoped to it.
+            auth_api_url:
+                Base URL of the auth API, without a trailing slash. `/tokens/authorise` is
+                appended to it.
+            logger:
+                Used for the request and decision debug lines, and for the exception logged
+                before an `AuthApiRequestError` is raised.
+            timeout:
+                Per-request timeout in seconds for the sync path. The async path ignores it and
+                takes its timeout from `async_client`.
             async_client:
-                An optional long-lived `httpx.AsyncClient` for the async path to reuse.
+                An optional long-lived `httpx.AsyncClient` for the async path to reuse. Its
+                lifecycle stays with the caller: this client never closes it.
                 If left unset, only the sync path is usable: `aget_user_authorisation_info`
                 raises `AuthApiConfigurationError`.
         """
