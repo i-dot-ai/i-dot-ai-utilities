@@ -44,10 +44,12 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.12.2",
     "mypy>=1.15.0",
+    "pytest-asyncio>=1.0.0",
 ]
 
 # Auth module - Adds HTTP request capabilities
 auth = [
+    "httpx>=0.28.1",
     "requests>=2.32.3",
 ]
 
@@ -226,6 +228,7 @@ dev = [
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
+    "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
     "starlette>=0.47.0",
@@ -256,6 +259,8 @@ exclude = [
 packages = ["src/i_dot_ai_utilities"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "error",
     "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:botocore.auth",
