@@ -306,7 +306,7 @@ class StructuredLoggingMiddlewareOTel:
                     actual_provider=type(provider).__name__,
                     logging_schema_version=_SCHEMA_VERSION,
                     remediation=(
-                        "call i_dot_ai_utilities.logging._otel."
+                        "call i_dot_ai_utilities.logging.otel."
                         "configure_otel_for_django(service_name=...) at "
                         "process startup (wsgi.py / asgi.py / "
                         "AppConfig.ready())"
