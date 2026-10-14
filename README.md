@@ -137,6 +137,15 @@ pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://
 
 `--pre` alone is not enough for the Test PyPI channel: the package only exists on Test PyPI, so you must also point the installer at that index (and keep production PyPI as a fallback for dependencies).
 
+## Code Ownership
+
+Code ownership is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS).
+
+The owning team for a module is determined as follows:
+
+- **Platform team** — any module that creates or modifies cloud resources in platform-managed infrastructure (for example, via `boto3`) requires platform team oversight.
+- **Software or application team** — all other modules are owned by the software team or the dedicated application team most relevant to that module.
+
 ## Licence
 
 MIT

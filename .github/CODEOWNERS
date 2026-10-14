@@ -1,0 +1,9 @@
+# Default owner for everything not matched by a more specific rule below
+* @i-dot-ai/utilities-pypi-contributors
+
+# Module-level ownership
+/src/i_dot_ai_utilities/auth/       @i-dot-ai/platform-team
+/src/i_dot_ai_utilities/file_store/ @i-dot-ai/platform-team
+/src/i_dot_ai_utilities/litellm/    @i-dot-ai/ai-gateway-team
+/src/i_dot_ai_utilities/logging/    @i-dot-ai/platform-team
+/src/i_dot_ai_utilities/metrics/    @i-dot-ai/platform-team
