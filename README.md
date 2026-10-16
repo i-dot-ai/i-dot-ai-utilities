@@ -14,6 +14,8 @@ When installing the package, the base package comes with only the `logger` modul
 - otel _(pre-release)_
 - otel_django _(pre-release)_
 - otel_fastapi _(pre-release)_
+- otel_native _(pre-release)_
+- otel_lambda _(pre-release)_
 - django _(pre-release)_
 - all
 
@@ -29,7 +31,7 @@ uv pip install "i-dot-ai-utilities[all]"
 
 Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
 
-> ⚠️ **The `otel`, `otel_django`, `otel_fastapi`, and `django` extras are pre-release, use with caution.** They're compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack. Pass `--pre` (or pin the pre-release version) to install them; a plain `pip install` won't pull a pre-release. `[all]` pulls them in too, so it also needs `--pre` during the pre-release window.
+> ⚠️ **The `otel*` and `django` extras are pre-release; pass `--pre` (or pin the exact pre-release version) to install them.** `[otel_native]` and `[otel_lambda]` target the `otel-gateway` logs pipeline via `i_dot_ai_utilities.otel.configure_otel`. The legacy `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` extras remain on the existing structlog/PoC bridge until the container follow-ups land. `[all]` pulls in the pre-release extras too, so it also requires `--pre` during the pre-release window.
 
 ## Features
 
@@ -71,11 +73,13 @@ More information on usage and setup can be found in the [litellm library readme]
 
 #### OpenTelemetry & Django middleware
 
-The `otel` extra adds a framework-agnostic OpenTelemetry bootstrap (`configure_otel` and the framework helpers `configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and an optional structlog log bridge to an OTLP endpoint, with W3C + AWS X-Ray propagation. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation, so you only pull the instrumentation you actually use.
+For Python AWS Lambdas sending structured logs to the internal `otel-gateway`, install `[otel_lambda]` and call `i_dot_ai_utilities.otel.configure_otel` after defining your handler. That native path configures the standard OpenTelemetry SDK, Python `logging` handler, AWS Lambda and botocore auto-instrumentation, synchronous per-invocation log flushing, and an outage circuit breaker without routing through `StructuredLogger`. `[otel_native]` provides the common SDK and OTLP/HTTP dependencies without the Lambda instrumentation packages.
 
-The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app wanting the full stack, install `[django,otel_django]`.
+The legacy `otel` extra (`i_dot_ai_utilities.logging.otel`) remains unchanged for the existing framework-bridge track (`configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and the structlog log bridge. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation.
 
-> ⚠️ **Pre-release, use with caution** (see the [Installation](#installation) note): compatible only with the OpenTelemetry PoC pipeline, not the existing i.AI observability stack.
+The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app on the legacy bridge track, install `[django,otel_django]`.
+
+> ⚠️ **Pre-release** (see the [Installation](#installation) note): `[otel_native]` and `[otel_lambda]` target the `otel-gateway` logs pipeline; the existing `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` bridge extras stay on their PoC behaviour until the container follow-ups.
 
 You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
 
