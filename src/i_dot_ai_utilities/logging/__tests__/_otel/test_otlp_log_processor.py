@@ -9,7 +9,7 @@ pytest.importorskip("opentelemetry")
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import (
-    InMemoryLogExporter,
+    InMemoryLogRecordExporter,
     SimpleLogRecordProcessor,
 )
 from opentelemetry.sdk.trace import TracerProvider
@@ -22,7 +22,7 @@ from i_dot_ai_utilities.logging._otel.otlp_log_processor import (
 # shared provider for the module and clear the exporter between tests.
 # SimpleLogRecordProcessor exports synchronously on emit, so tests can read the
 # record back immediately.
-_SHARED_EXPORTER = InMemoryLogExporter()
+_SHARED_EXPORTER = InMemoryLogRecordExporter()
 _SHARED_PROVIDER = LoggerProvider()
 _SHARED_PROVIDER.add_log_record_processor(SimpleLogRecordProcessor(_SHARED_EXPORTER))
 
@@ -33,7 +33,7 @@ def _install_logger_provider() -> None:
 
 
 @pytest.fixture
-def log_exporter() -> InMemoryLogExporter:
+def log_exporter() -> InMemoryLogRecordExporter:
     _SHARED_EXPORTER.clear()
     return _SHARED_EXPORTER
 
@@ -46,7 +46,7 @@ def test_returns_event_dict_unchanged() -> None:
     assert out["user_id"] == 1
 
 
-def test_emits_record_with_body_severity_and_attributes(log_exporter: InMemoryLogExporter) -> None:
+def test_emits_record_with_body_severity_and_attributes(log_exporter: InMemoryLogRecordExporter) -> None:
     event = {
         "event": "hello",
         "level": "info",
@@ -66,7 +66,7 @@ def test_emits_record_with_body_severity_and_attributes(log_exporter: InMemoryLo
     assert dict(record.attributes) == {"poc_run_id": "poc-ts-001"}
 
 
-def test_sets_nonzero_timestamp(log_exporter: InMemoryLogExporter) -> None:
+def test_sets_nonzero_timestamp(log_exporter: InMemoryLogRecordExporter) -> None:
     # A zero/unset timestamp maps to OTLP time_unix_nano=0, which surfaces as
     # @timestamp=1970 in OpenSearch, so the processor must always set it.
     otel_otlp_log_emitter_processor(None, "info", {"event": "hi", "level": "info"})
@@ -76,7 +76,7 @@ def test_sets_nonzero_timestamp(log_exporter: InMemoryLogExporter) -> None:
     assert record.timestamp > 0
 
 
-def test_correlates_with_active_span(log_exporter: InMemoryLogExporter) -> None:
+def test_correlates_with_active_span(log_exporter: InMemoryLogRecordExporter) -> None:
     tracer = TracerProvider().get_tracer(__name__)
     with tracer.start_as_current_span("work"):
         otel_otlp_log_emitter_processor(None, "info", {"event": "hi", "level": "info"})
