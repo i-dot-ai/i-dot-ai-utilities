@@ -449,7 +449,7 @@ logger.setLevel(logging.INFO)
 def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, int]:
     logger.info(
         "Authorisation request started",
-        extra={"application": event.get("application", "unknown")},
+        extra={"i_ai.auth.application": event.get("application", "unknown")},
     )
     try:
         return {"statusCode": 200}
@@ -461,6 +461,19 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, i
 # Call after defining lambda_handler so the instrumentor wraps _HANDLER.
 configure_otel(service_name="core-auth-api")
 ```
+
+### Naming log attributes
+
+Attribute names are shared across every service that sends to `otel-gateway`. Pick them using these steps, in order:
+
+1. **Use an OpenTelemetry semantic convention attribute if one fits.** Look it up in the [attribute registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/). It's the one list for every signal: logs, traces, metrics and resources all use the same attribute names. For example, use `user.email` for an email address, `url.full` for a URL and `error.type` for an error class.
+2. **Otherwise, prefix the name with `i_ai.<service>.`** For example, `i_ai.auth.decision.reason`.
+3. **Never add your own names under an OpenTelemetry namespace** such as `user.`, `http.`, `app.` or `service.`, even if `user.my_field` reads well. OpenTelemetry can define that name later with a different meaning.
+4. **Lay out the name `<namespace>.<object>.<property>`**: lowercase, with dots between levels and `snake_case` inside a level. For example, `i_ai.auth.token.key_id`, not `i_ai.auth.tokenKeyId` or `i_ai.auth.token_key_id`.
+
+The registry shows a stability for each attribute. `Stable` names won't change. `Development` names, such as `user.email`, may be renamed in a later release of the conventions.
+
+The [semantic conventions home page](https://opentelemetry.io/docs/specs/semconv/) covers the rest of each signal: span names and kinds for [traces](https://opentelemetry.io/docs/specs/semconv/general/trace/), instrument names and units for [metrics](https://opentelemetry.io/docs/specs/semconv/general/metrics/), [log record](https://opentelemetry.io/docs/specs/semconv/general/logs/) attributes, and [resource](https://opentelemetry.io/docs/specs/semconv/resource/) attributes such as `service.name`. The full naming rules are in the [naming specification](https://opentelemetry.io/docs/specs/semconv/general/naming/).
 
 Never log bearer tokens, `Authorization` headers, JWT segments, or raw request bodies. The library does not copy the Lambda event onto log records automatically.When you need custom span attributes, use the standard OpenTelemetry API directly (`from opentelemetry import trace; trace.get_current_span().set_attribute(...)`).
 
@@ -501,6 +514,7 @@ When `AWS_LAMBDA_FUNCTION_NAME` is present (or `runtime="lambda"` is passed), `c
 - **On Lambda with an endpoint configured:** `configure_otel()` removes only the Lambda runtime's built-in `awslambdaric.bootstrap.LambdaLoggerHandler*` handlers from the root logger and attaches a filtered OTel `LoggingHandler` (excluding `opentelemetry.*` internal loggers to prevent recursion). Application logs are exported over OTLP only and are not duplicated to CloudWatch stdout.
 - **On Lambda with no endpoint configured:** `configure_otel()` fails open, writes a single warning to `stderr`, disables OTLP export, and emits no application logs to stdout.
 - **Locally (`AWS_LAMBDA_FUNCTION_NAME` unset) with no endpoint configured:** `configure_otel()` warns once to `stderr` and falls back to the SDK's `ConsoleLogRecordExporter` so logs remain readable during local development.
+- **Library loggers:** `configure_otel()` sets the `botocore`, `boto3` and `urllib3` loggers to `WARNING` so their INFO messages are not exported. It leaves any level your application set before calling `configure_otel()` unchanged.
 
 ### Flush budget, outage circuit breaker, and failure signal
 

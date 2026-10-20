@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 RuntimeName = Literal["lambda", "local"]
 
 _INTERNAL_OTEL_LOGGER_PREFIX = "opentelemetry"
+_NOISY_LIBRARY_LOGGERS = ("botocore", "boto3", "urllib3")
 
 _configured: bool = False
 _logger_provider: LoggerProvider | None = None
@@ -185,6 +186,11 @@ def _install_root_handler_and_configure_provider(
         # untouched so standard ``logging.getLogger(__name__).info(...)`` works
         # out of the box without overriding an application-configured level.
         root_logger.setLevel(logging.INFO)
+    for name in _NOISY_LIBRARY_LOGGERS:
+        # Keep AWS SDK and HTTP client INFO chatter out of OTLP unless the app set a level.
+        library_logger = logging.getLogger(name)
+        if library_logger.level == logging.NOTSET:
+            library_logger.setLevel(logging.WARNING)
     return handler
 
 

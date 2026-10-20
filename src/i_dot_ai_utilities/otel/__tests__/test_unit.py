@@ -11,13 +11,16 @@ from typing import TYPE_CHECKING
 import pytest
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import (
+    InMemoryLogRecordExporter,
     LogRecordExporter,
     LogRecordExportResult,
+    SimpleLogRecordProcessor,
 )
 
 import i_dot_ai_utilities.otel as public_otel
 from i_dot_ai_utilities.otel._configuration import (
     _ExcludeInternalOtelFilter,
+    _install_root_handler_and_configure_provider,
     _reset_for_tests,
     configure_otel,
     detect_runtime,
@@ -348,3 +351,29 @@ class TestLambdaHelpers:
     def test_public_surface_exposes_only_configure_otel(self) -> None:
         assert public_otel.__all__ == ["configure_otel"]
         assert public_otel.configure_otel is configure_otel
+
+    def test_library_loggers_default_to_warning_unless_app_set_a_level(self) -> None:
+        names = ("botocore", "boto3", "urllib3")
+        saved = {name: logging.getLogger(name).level for name in (*names, "")}
+        root_logger = logging.getLogger()
+        exporter = InMemoryLogRecordExporter()
+        provider = LoggerProvider()
+        provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
+        for name in names:
+            logging.getLogger(name).setLevel(logging.NOTSET)
+        logging.getLogger("urllib3").setLevel(logging.INFO)
+        handler = _install_root_handler_and_configure_provider(provider, "local")
+        try:
+            logging.getLogger("botocore.credentials").info("Found credentials")
+            logging.getLogger("botocore.credentials").warning("botocore-warning")
+            logging.getLogger("urllib3").info("urllib3-info")
+
+            bodies = [r.log_record.body for r in exporter.get_finished_logs()]
+            assert bodies == ["botocore-warning", "urllib3-info"]
+            assert logging.getLogger("boto3").level == logging.WARNING
+            assert logging.getLogger("urllib3").level == logging.INFO
+        finally:
+            root_logger.removeHandler(handler)
+            for name, level in saved.items():
+                logging.getLogger(name).setLevel(level)
+            provider.shutdown()
