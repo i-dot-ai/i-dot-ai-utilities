@@ -28,6 +28,8 @@ classifiers = [
 
 # Default dependencies - only includes logging module dependencies
 dependencies = [
+    # Floor drops the compromised eMudhra/emSign roots (GHSA-6q48-6c7w-9gw2) for every HTTPS-using extra.
+    "certifi>=2026.10.19",
     "pydantic>=2.11.9",
     "pydantic-settings>=2.10.1",
     "structlog>=25.4.0",
