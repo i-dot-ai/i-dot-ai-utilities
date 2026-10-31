@@ -7,7 +7,7 @@ name = "i-dot-ai-utilities"
 version = "0.0.1"
 description = "Utilities for i.ai to use"
 readme = "README.md"
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.11,<4.0"
 license = {text = "MIT"}
 authors = [
     {name = "i-dot-ai-packages", email = "packages@cabinetoffice.gov.uk"},
@@ -20,7 +20,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -42,7 +41,7 @@ dependencies = [
 [project.optional-dependencies]
 # Development dependencies
 dev = [
-    "pytest>=8.3.5",
+    "pytest>=9.0.3",
     "pytest-cov>=6.1.1",
     "ruff>=0.12.2",
     "mypy>=1.15.0",
@@ -52,7 +51,7 @@ dev = [
 # Auth module - Adds HTTP request capabilities
 auth = [
     "httpx>=0.28.1",
-    "requests>=2.32.3",
+    "requests>=2.33.0",
 ]
 
 # File store module - Adds cloud storage support (AWS S3, Azure Blob, GCP Cloud Storage, MinIO)
@@ -68,8 +67,8 @@ file_store = [
 
 # LiteLLM module - Adds LLM integration capabilities
 litellm = [
-    "litellm==1.79.0",
-    "requests>=2.32.3",
+    "litellm==1.100.4",
+    "requests>=2.33.0",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
     "langfuse>=3.4.0",
@@ -86,7 +85,7 @@ metrics = []
 # [otel_django] extra for the OTel bootstrap and auto-instrumentation:
 # `pip install "i-dot-ai-utilities[django,otel_django]"`.
 django = [
-    "django>=4.2,<6.0",
+    "django>=5.2.17,<6.0",
 ]
 
 # OTel core - framework-agnostic bootstrap (configure_otel): traces, metrics,
@@ -120,8 +119,8 @@ all = [
     "boto3>=1.40.41",
     "boto3-stubs[s3]>=1.40.41",
     "minio>=7.2.15",
-    "litellm==1.79.0",
-    "requests>=2.32.3",
+    "litellm==1.100.4",
+    "requests>=2.33.0",
     "rapidfuzz>=3.14.1",
     "ecologits>=0.8.2",
     "langfuse>=3.4.0",
@@ -129,7 +128,7 @@ all = [
     "azure-core>=1.35.1",
     "azure-storage-blob>=12.26.0",
     "grpcio-status>=1.76.0",
-    "django>=4.2,<6.0",
+    "django>=5.2.17,<6.0",
     "opentelemetry-api>=1.27",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp-proto-http>=1.27",
@@ -226,10 +225,10 @@ line-ending = "auto"
 [dependency-groups]
 dev = [
     "bandit>=1.8.3",
-    "django>=4.2,<6.0",
+    "django>=5.2.17,<6.0",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
-    "pytest>=8.3.5",
+    "pytest>=9.0.3",
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.7",
