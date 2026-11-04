@@ -7,6 +7,7 @@ import importlib
 import logging
 import os
 import sys
+import threading
 from typing import TYPE_CHECKING, Any, Final
 
 from opentelemetry._logs import get_logger_provider
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     )
 
 ENV_FLUSH_MARGIN_MS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS"
+ENV_KEEP_STDOUT_LOGS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS"
 DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
@@ -50,6 +52,18 @@ DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS: Final[str] = "2000"
 OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT: Final[str] = "OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT"
 
 _LAMBDA_HANDLER_MARKER: Final[str] = "_i_dot_ai_otel_lambda_wrapped"
+
+_inflight_flush: threading.Thread | None = None
+
+
+def keep_stdout_logs_requested() -> bool:
+    """Return True when the app opts in to keeping Lambda stdout logs alongside OTLP."""
+    return os.environ.get(ENV_KEEP_STDOUT_LOGS, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _reset_for_tests() -> None:
+    global _inflight_flush  # noqa: PLW0603
+    _inflight_flush = None
 
 
 def has_otlp_logs_endpoint() -> bool:
@@ -90,7 +104,13 @@ def is_lambda_runtime_stdout_handler(handler: logging.Handler) -> bool:
 def remove_lambda_runtime_stdout_handlers(
     root_logger: logging.Logger | None = None,
 ) -> int:
-    """Remove only ``awslambdaric``'s root handlers so application logs are not duplicated."""
+    """Remove only ``awslambdaric``'s root handlers so application logs are not duplicated.
+
+    Keeps them when OTLP log export is disabled, so turning export off never
+    turns application logging off, or when the app opts in to stdout as a fallback.
+    """
+    if os.environ.get(OTEL_LOGS_EXPORTER, "").strip().lower() in {"", "none"} or keep_stdout_logs_requested():
+        return 0
     root = root_logger if root_logger is not None else logging.getLogger()
     removed = 0
     for handler in list(root.handlers):
@@ -145,7 +165,18 @@ def _remaining_time_millis(context: Any) -> int | None:
     return None
 
 
-def flush_lambda_logs(
+def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outcome: dict[str, bool]) -> None:
+    try:
+        provider = get_logger_provider()
+        if hasattr(provider, "force_flush"):
+            outcome["flushed"] = bool(provider.force_flush(timeout_ms))
+        else:
+            outcome["flushed"] = processor.force_flush(timeout_ms)
+    except Exception:  # noqa: BLE001 - flush must never break the handler
+        outcome["flushed"] = False
+
+
+def flush_lambda_logs(  # noqa: PLR0911 - each early return is a distinct skip reason
     context: Any,
     *,
     processor: TrackedBatchLogRecordProcessor | None,
@@ -154,12 +185,22 @@ def flush_lambda_logs(
 ) -> bool:
     """Flush queued OTLP logs at the end of a Lambda invocation.
 
+    The flush runs on a worker thread and the handler waits at most the export
+    timeout, so a slow DNS lookup or connect cannot hold the response beyond it.
     Returns True when a flush ran and succeeded, False when skipped or failed.
     """
+    global _inflight_flush  # noqa: PLW0603
+
     if processor is None:
         return True
 
     if breaker.is_open():
+        # Keep the failure metric flowing for the whole outage, not just its first flush.
+        failure_emitter("breaker_open")
+        return False
+
+    if _inflight_flush is not None and _inflight_flush.is_alive():
+        failure_emitter("flush_in_progress")
         return False
 
     timeout_ms = resolve_logs_export_timeout_ms()
@@ -170,16 +211,23 @@ def flush_lambda_logs(
 
     exporter = processor.exporter
     exporter.reset_window()
-    try:
-        provider = get_logger_provider()
-        if hasattr(provider, "force_flush"):
-            flushed = bool(provider.force_flush(timeout_ms))
-        else:
-            flushed = processor.force_flush(timeout_ms)
-    except Exception:  # noqa: BLE001 - flush must never break the handler
-        flushed = False
-        breaker.record_failure()
+    outcome: dict[str, bool] = {}
+    worker = threading.Thread(
+        target=_run_flush,
+        args=(processor, timeout_ms, outcome),
+        name="i-dot-ai-otel-flush",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout_ms / 1000)
 
+    if worker.is_alive():
+        # Abandon the stuck export; it finishes or fails on a later thaw, and later flushes skip while it runs.
+        _inflight_flush = worker
+        failure_emitter("flush_timeout")
+        return False
+
+    flushed = outcome.get("flushed", False)
     exporter_failed = exporter.consume_failure()
     if not flushed or exporter_failed:
         if not exporter_failed:
@@ -284,11 +332,13 @@ __all__ = [
     "DEFAULT_FLUSH_MARGIN_MS",
     "DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS",
     "ENV_FLUSH_MARGIN_MS",
+    "ENV_KEEP_STDOUT_LOGS",
     "apply_lambda_env_defaults",
     "flush_lambda_logs",
     "has_otlp_logs_endpoint",
     "instrument_lambda_runtime",
     "is_lambda_runtime_stdout_handler",
+    "keep_stdout_logs_requested",
     "remove_lambda_runtime_stdout_handlers",
     "resolve_flush_margin_ms",
     "resolve_lambda_handler_target",

@@ -251,13 +251,63 @@ class TestLambdaEndToEnd:
             assert len(server.requests_for_path("/v1/logs")) == 1
 
             stdout_lines = [line for line in proc.stdout.splitlines() if line.strip()]
-            assert len(stdout_lines) == 1
-            emf = json.loads(stdout_lines[0])
+            assert len(stdout_lines) == 2
+            emf, breaker_emf = (json.loads(line) for line in stdout_lines)
             assert emf["level"] == "WARNING"
             assert emf["event"] == EMF_EVENT_NAME
+            assert emf["reason"] == "export_failure"
             assert emf["FunctionName"] == "core-auth-api-authorise-token"
             assert emf[EMF_METRIC_NAME] == 1
             assert emf["_aws"]["CloudWatchMetrics"][0]["Namespace"] == EMF_NAMESPACE
+            # The skipped flush still counts, so the alarm keeps firing for the whole outage.
+            assert breaker_emf["reason"] == "breaker_open"
+
+    def test_slow_dns_is_bounded_by_export_timeout(self) -> None:
+        proc, summary = _run_scenario(
+            [
+                {"request_id": "req-dns-1", "remaining_ms": 4500, "event": {"mode": "ok"}},
+                {"request_id": "req-dns-2", "remaining_ms": 4500, "event": {"mode": "ok"}},
+            ],
+            env_overrides={
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-gateway.invalid:4318",
+                "OTEL_SERVICE_NAME": "core-auth-api",
+                "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT": "0.5",
+                "I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS": "100",
+                "TEST_SLOW_DNS_SECONDS": "5",
+            },
+        )
+
+        first, second = summary["results"]
+        assert first["returned"]["statusCode"] == 200
+        assert second["returned"]["statusCode"] == 200
+        assert first["elapsed_ms"] < 1000.0
+        assert second["elapsed_ms"] < 200.0
+        reasons = [json.loads(line)["reason"] for line in proc.stdout.splitlines() if line.strip()]
+        assert reasons == ["flush_timeout", "flush_in_progress"]
+
+    def test_keep_stdout_logs_writes_to_runtime_handler_and_otlp(self) -> None:
+        with OtlpCaptureServer() as server:
+            _, summary = _run_scenario(
+                [{"request_id": "req-both", "remaining_ms": 4500, "event": {"mode": "ok", "application": "dual"}}],
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "OTEL_SERVICE_NAME": "core-auth-api",
+                    "I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS": "true",
+                },
+            )
+            assert "Authorisation request started for dual" in summary["runtime_handler_output"]
+            assert [rec.body for rec in server.log_records] == ["Authorisation request started for dual"]
+
+    def test_exporter_none_keeps_runtime_stdout_logging(self) -> None:
+        _, summary = _run_scenario(
+            [{"request_id": "req-off", "remaining_ms": 4500, "event": {"mode": "ok", "application": "off"}}],
+            env_overrides={
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:9",
+                "OTEL_SERVICE_NAME": "core-auth-api",
+                "OTEL_LOGS_EXPORTER": "none",
+            },
+        )
+        assert "Authorisation request started for off" in summary["runtime_handler_output"]
 
     def test_service_name_precedence_and_missing_warning(self) -> None:
         with OtlpCaptureServer() as server:
@@ -291,7 +341,7 @@ class TestLambdaEndToEnd:
             )
             assert proc.stderr.count("service_name is not set") == 1
 
-    def test_missing_endpoint_on_lambda_warns_once_and_emits_no_stdout_logs(self) -> None:
+    def test_missing_endpoint_on_lambda_warns_once_and_keeps_stdout_logs(self) -> None:
         proc, summary = _run_scenario(
             [{"request_id": "req-no-endpoint", "remaining_ms": 4500, "event": {"mode": "ok"}}],
             env_overrides={
@@ -300,7 +350,8 @@ class TestLambdaEndToEnd:
             },
         )
         assert proc.stdout == ""
-        assert summary["runtime_handler_output"] == ""
+        # Export is off, so the runtime's own stdout handler must keep application logs flowing.
+        assert "Authorisation request started" in summary["runtime_handler_output"]
         assert proc.stderr.count("continuing with OTLP log export disabled") == 1
 
     def test_missing_endpoint_locally_uses_console_log_exporter(self) -> None:

@@ -57,9 +57,23 @@ def _install_simulated_lambda_runtime_handlers() -> tuple[io.StringIO, io.String
     return runtime_buf, user_buf
 
 
+def _install_slow_dns(seconds: float) -> None:
+    import socket  # noqa: PLC0415
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def slow_getaddrinfo(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(seconds)
+        return real_getaddrinfo(*args, **kwargs)
+
+    socket.getaddrinfo = slow_getaddrinfo  # type: ignore[assignment]
+
+
 def main() -> int:
     scenario = json.loads(sys.argv[1])
     runtime_buf, user_buf = _install_simulated_lambda_runtime_handlers()
+    if os.environ.get("TEST_SLOW_DNS_SECONDS"):
+        _install_slow_dns(float(os.environ["TEST_SLOW_DNS_SECONDS"]))
 
     mod = importlib.import_module("i_dot_ai_utilities.otel.__tests__.fixtures.sample_lambda_handler")
     results: list[dict[str, Any]] = []

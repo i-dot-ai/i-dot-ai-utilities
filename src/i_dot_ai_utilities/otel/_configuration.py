@@ -32,6 +32,9 @@ from i_dot_ai_utilities.otel._export import (
     resolve_circuit_breaker_seconds,
 )
 from i_dot_ai_utilities.otel._lambda import (
+    _reset_for_tests as _reset_lambda_for_tests,
+)
+from i_dot_ai_utilities.otel._lambda import (
     apply_lambda_env_defaults,
     has_otlp_logs_endpoint,
     instrument_lambda_runtime,
@@ -278,6 +281,7 @@ def _reset_for_tests() -> None:
     root_logger = logging.getLogger()
     if _root_logging_handler is not None and _root_logging_handler in root_logger.handlers:
         root_logger.removeHandler(_root_logging_handler)
+    _reset_lambda_for_tests()
 
     if _logger_provider is not None and hasattr(_logger_provider, "shutdown"):
         with contextlib.suppress(Exception):

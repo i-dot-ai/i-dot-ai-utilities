@@ -75,6 +75,8 @@ More information on usage and setup can be found in the [litellm library readme]
 
 For Python AWS Lambdas sending structured logs to the internal `otel-gateway`, install `[otel_lambda]` and call `i_dot_ai_utilities.otel.configure_otel` after defining your handler. That native path configures the standard OpenTelemetry SDK, Python `logging` handler, AWS Lambda and botocore auto-instrumentation, synchronous per-invocation log flushing, and an outage circuit breaker without routing through `StructuredLogger`. `[otel_native]` provides the common SDK and OTLP/HTTP dependencies without the Lambda instrumentation packages.
 
+On Lambda, each flush is capped at `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` of wall-clock time, DNS lookup included. While the breaker is open, every skipped flush still emits the `i-dot-ai/otel` `ExportFailures` metric. The runtime's stdout handler stays in place when `OTEL_LOGS_EXPORTER=none`. Set `I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS=true` to keep stdout logs alongside OTLP as a fallback.
+
 The legacy `otel` extra (`i_dot_ai_utilities.logging.otel`) remains unchanged for the existing framework-bridge track (`configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and the structlog log bridge. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation.
 
 The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app on the legacy bridge track, install `[django,otel_django]`.

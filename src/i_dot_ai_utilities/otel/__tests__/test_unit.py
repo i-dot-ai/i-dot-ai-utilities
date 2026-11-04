@@ -42,6 +42,7 @@ from i_dot_ai_utilities.otel._export import (
 from i_dot_ai_utilities.otel._lambda import (
     DEFAULT_FLUSH_MARGIN_MS,
     ENV_FLUSH_MARGIN_MS,
+    ENV_KEEP_STDOUT_LOGS,
     flush_lambda_logs,
     is_lambda_runtime_stdout_handler,
     remove_lambda_runtime_stdout_handlers,
@@ -276,7 +277,10 @@ class TestLambdaHelpers:
         monkeypatch.setenv("ORIG_HANDLER", "pkg.mod.orig_handler")
         assert resolve_lambda_handler_target() == ("pkg.mod", "orig_handler")
 
-    def test_remove_only_lambda_runtime_stdout_handlers(self) -> None:
+    def test_remove_only_lambda_runtime_stdout_handlers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
+        monkeypatch.delenv(ENV_KEEP_STDOUT_LOGS, raising=False)
+
         class LambdaLoggerHandler(logging.StreamHandler):  # type: ignore[type-arg]
             pass
 
@@ -292,6 +296,23 @@ class TestLambdaHelpers:
         removed = remove_lambda_runtime_stdout_handlers(test_logger)
         assert removed == 1
         assert test_logger.handlers == [custom_handler]
+
+    @pytest.mark.parametrize("exporter", ["none", "None", " NONE ", ""])
+    def test_runtime_stdout_handlers_kept_when_export_disabled(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        exporter: str,
+    ) -> None:
+        class LambdaLoggerHandler(logging.StreamHandler):  # type: ignore[type-arg]
+            pass
+
+        LambdaLoggerHandler.__module__ = "awslambdaric.bootstrap"
+        monkeypatch.setenv("OTEL_LOGS_EXPORTER", exporter)
+        test_logger = logging.getLogger("test.runtime.handlers.disabled")
+        runtime_handler = LambdaLoggerHandler(io.StringIO())
+        test_logger.handlers = [runtime_handler]
+        assert remove_lambda_runtime_stdout_handlers(test_logger) == 0
+        assert test_logger.handlers == [runtime_handler]
 
     def test_flush_lambda_logs_skips_when_remaining_time_below_budget(
         self,
