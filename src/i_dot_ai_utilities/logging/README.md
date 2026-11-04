@@ -219,7 +219,7 @@ configure_otel_for_django(
 
 Dev (OTel PoC) endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT=https://search-i-dot-ai-dev-otel-poc-ekysqcfxvnh6touzvaf4dqa7ju.eu-west-2.es.amazonaws.com`
 
-After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. For Lambda/Batch use `configure_otel_for_lambda` and `force_flush_otel()` before exit.
+After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. Legacy callers on this bridge path can also call `configure_otel_for_lambda` and `force_flush_otel()` before exit; new Python Lambdas targeting `otel-gateway` should use the native `i_dot_ai_utilities.otel` section at the bottom of this guide instead.
 
 If you forget to call `configure_otel_for_django` at startup, `StructuredLoggingMiddlewareOTel` emits a loud one-shot WARNING at worker boot (`structured_logging_middleware_otel_tracer_provider_missing`) pointing straight at the fix, so the degraded "no trace ids on logs" state is visible immediately rather than showing up as silent absence.
 
@@ -412,3 +412,117 @@ The middleware lifts the hardening that used to live inside the deleted `DjangoE
 ### Settings
 
 `DjangoUserIdMiddleware` honours the same `I_DOT_AI_LOGGER` and `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` settings as `StructuredLoggingMiddlewareOTel`; no additional configuration is required.
+
+<br>
+
+***
+
+<br>
+
+## OpenTelemetry-Native Python Lambda (`i_dot_ai_utilities.otel`)
+
+`i_dot_ai_utilities.otel` is a separate, opt-in OpenTelemetry-native path for Python AWS Lambdas sending structured logs to `otel-gateway`. It uses Python's standard `logging` module and the OpenTelemetry SDK's `LoggingHandler` directly, without routing through `StructuredLogger` or `structlog`. Existing `StructuredLogger` and Django middleware users are unaffected.
+
+### Install
+
+Install the `[otel_lambda]` pre-release extra (`[otel_native]` installs the common SDK and OTLP/HTTP dependencies without the Lambda and botocore instrumentors):
+
+```bash
+pip install --pre "i-dot-ai-utilities[otel_lambda]"
+```
+
+### Handler pattern
+
+Define your Lambda handler first, then call `configure_otel()` at the bottom of the handler module so `AwsLambdaInstrumentor` can wrap the function named in `_HANDLER` (or `ORIG_HANDLER`) without a Lambda layer:
+
+```python
+import logging
+from typing import Any
+
+from aws_lambda_powertools.utilities.typing import LambdaContext
+from i_dot_ai_utilities.otel import configure_otel
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, int]:
+    logger.info(
+        "Authorisation request started",
+        extra={"i_ai.auth.application": event.get("application", "unknown")},
+    )
+    try:
+        return {"statusCode": 200}
+    except Exception:
+        logger.exception("Authorisation request failed")
+        raise
+
+
+# Call after defining lambda_handler so the instrumentor wraps _HANDLER.
+configure_otel(service_name="core-auth-api")
+```
+
+### Naming log attributes
+
+Attribute names are shared across every service that sends to `otel-gateway`. Pick them using these steps, in order:
+
+1. **Use an OpenTelemetry semantic convention attribute if one fits.** Look it up in the [attribute registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/). It's the one list for every signal: logs, traces, metrics and resources all use the same attribute names. For example, use `user.email` for an email address, `url.full` for a URL and `error.type` for an error class.
+2. **Otherwise, prefix the name with `i_ai.<service>.`** For example, `i_ai.auth.decision.reason`.
+3. **Never add your own names under an OpenTelemetry namespace** such as `user.`, `http.`, `app.` or `service.`, even if `user.my_field` reads well. OpenTelemetry can define that name later with a different meaning.
+4. **Lay out the name `<namespace>.<object>.<property>`**: lowercase, with dots between levels and `snake_case` inside a level. For example, `i_ai.auth.token.key_id`, not `i_ai.auth.tokenKeyId` or `i_ai.auth.token_key_id`.
+
+The registry shows a stability for each attribute. `Stable` names won't change. `Development` names, such as `user.email`, may be renamed in a later release of the conventions.
+
+The [semantic conventions home page](https://opentelemetry.io/docs/specs/semconv/) covers the rest of each signal: span names and kinds for [traces](https://opentelemetry.io/docs/specs/semconv/general/trace/), instrument names and units for [metrics](https://opentelemetry.io/docs/specs/semconv/general/metrics/), [log record](https://opentelemetry.io/docs/specs/semconv/general/logs/) attributes, and [resource](https://opentelemetry.io/docs/specs/semconv/resource/) attributes such as `service.name`. The full naming rules are in the [naming specification](https://opentelemetry.io/docs/specs/semconv/general/naming/).
+
+Never log bearer tokens, `Authorization` headers, JWT segments, or raw request bodies. The library does not copy the Lambda event onto log records automatically.When you need custom span attributes, use the standard OpenTelemetry API directly (`from opentelemetry import trace; trace.get_current_span().set_attribute(...)`).
+
+### Service name precedence and allow-list
+
+`service.name` is resolved in the following order:
+
+1. Explicit `service_name="..."` passed to `configure_otel(service_name=...)`.
+2. `OTEL_SERVICE_NAME` in the environment (set automatically when `otel_gateway.enabled = true` on the shared Terraform module).
+3. If neither is set, `configure_otel()` writes a one-shot warning to `stderr` and falls back to the SDK default (`unknown_service`).
+
+The gateway's `filter/service_allowlist` processor silently drops logs whose `service.name` is not on `allowed_service_names` while still returning HTTP `200`. Keep the explicit `service_name` argument aligned with `otel_gateway.service_name` (or omit the argument and let `OTEL_SERVICE_NAME` win).
+
+### Environment variables and Lambda defaults
+
+When `AWS_LAMBDA_FUNCTION_NAME` is present (or `runtime="lambda"` is passed), `configure_otel()` sets the following defaults with `os.environ.setdefault` so explicit environment variables always win:
+
+| Variable | Lambda default | Purpose |
+|---|---|---|
+| `OTEL_SERVICE_NAME` | _(from Terraform or caller)_ | Service name when `service_name` is not passed in code |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(from Terraform SSM)_ | Base OTLP/HTTP collector URL (for example `https://otel-gateway.dev.i.ai.gov.uk:4318`); the SDK appends `/v1/logs` automatically |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | _(unset)_ | Optional signal-specific override (used verbatim by the SDK) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport protocol |
+| `OTEL_EXPORTER_OTLP_HEADERS` | _(unset)_ | Optional comma-separated `key=value` headers parsed by the SDK |
+| `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_ | Extra resource attributes such as `deployment.environment.name=dev` |
+| `OTEL_LOGS_EXPORTER` | `otlp` (or `none` if no endpoint is set) | Logs exporter selection |
+| `OTEL_TRACES_EXPORTER` | `none` | Disabled by default on Lambda because `otel-gateway` has a logs pipeline only |
+| `OTEL_METRICS_EXPORTER` | `none` | Disabled by default on Lambda because `otel-gateway` has a metrics pipeline off |
+| `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` | `2` (not set if `OTEL_EXPORTER_OTLP_TIMEOUT` is set) | Per-batch HTTP export timeout **in seconds** (Python OTel SDK 1.45 interprets this variable in seconds, so `2` means 2 seconds, not `2000`) |
+| `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `512` | Maximum records per OTLP POST so a normal invocation exports in one batch |
+| `OTEL_BLRP_MAX_QUEUE_SIZE` | `2048` | Maximum buffered log records across invocations |
+| `OTEL_BLRP_SCHEDULE_DELAY` | `60000` | Background batch delay in milliseconds; flushing is driven at invocation boundaries |
+| `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` | `250` | Minimum remaining execution time buffer (in milliseconds) required on top of the export timeout before flushing |
+| `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS` | `30` | Seconds to skip synchronous flushes after an export or flush failure |
+
+### Missing-endpoint and stdout behaviour
+
+- **On Lambda with an endpoint configured:** `configure_otel()` removes only the Lambda runtime's built-in `awslambdaric.bootstrap.LambdaLoggerHandler*` handlers from the root logger and attaches a filtered OTel `LoggingHandler` (excluding `opentelemetry.*` internal loggers to prevent recursion). Application logs are exported over OTLP only and are not duplicated to CloudWatch stdout.
+- **On Lambda with no endpoint configured:** `configure_otel()` fails open, writes a single warning to `stderr`, disables OTLP export, and emits no application logs to stdout.
+- **Locally (`AWS_LAMBDA_FUNCTION_NAME` unset) with no endpoint configured:** `configure_otel()` warns once to `stderr` and falls back to the SDK's `ConsoleLogRecordExporter` so logs remain readable during local development.
+- **Library loggers:** `configure_otel()` sets the `botocore`, `boto3` and `urllib3` loggers to `WARNING` so their INFO messages are not exported. It leaves any level your application set before calling `configure_otel()` unchanged.
+
+### Flush budget, outage circuit breaker, and failure signal
+
+At the end of every invocation (normal return, caught-error return, or unhandled exception), the outer Lambda wrapper flushes buffered logs inside `finally` after `AwsLambdaInstrumentor` finishes the invocation span:
+
+1. **Remaining-time budget check:** before flushing, the wrapper checks `context.get_remaining_time_in_millis()`. If the remaining time is less than `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT * 1000 + I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` (default `2250 ms`), the flush is skipped so observability never causes a function timeout. The records stay queued for the next invocation on that execution environment.
+2. **Single-batch vs multi-batch caveat:** in OpenTelemetry Python SDK 1.45, `BatchLogRecordProcessor.force_flush()` ignores its `timeout_millis` argument; the HTTP exporter's `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` (`2` seconds by default) bounds each batch. Keep `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` large enough (`512` by default) that an invocation fits in one batch; flushing `N` healthy batches can take up to `N` exporter timeouts. During an outage, the first failed batch opens the breaker and the rest of that flush fails immediately, so an outage costs at most one exporter timeout per flush.
+3. **Outage circuit breaker:** if an export or flush fails, the process-local circuit breaker opens for `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS` (`30` seconds by default). While open, subsequent invocations skip synchronous flushing immediately so gateway outages do not add latency to every request. New records stay buffered in the SDK queue up to `OTEL_BLRP_MAX_QUEUE_SIZE` (`2048`); once full, the oldest records are dropped. A failed export drops its batch, and so does the SDK's background export (every `OTEL_BLRP_SCHEDULE_DELAY`) if it runs while the breaker is open: up to one batch each time.
+4. **CloudWatch EMF failure signal:** when a flush or export fails on Lambda, the library writes exactly one JSON line to `stdout` with `level="WARNING"`, `event="otel_log_export_failed"`, and an embedded CloudWatch metric in namespace `i-dot-ai/otel` (`ExportFailures = 1`, dimension `FunctionName`). Enable `export_failures_threshold = 0` on `modules/observability/lambda-alarms` to alert on this metric.
+5. **At-least-once delivery:** a batch that reaches S3 on the gateway just as the client times out may be retried, producing duplicate log records. Consumers and queries should tolerate duplicates and can deduplicate using `trace_id` / `faas.invocation_id`.
+

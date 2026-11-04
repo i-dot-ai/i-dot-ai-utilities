@@ -16,7 +16,7 @@ test:
 	export IAI_LITELLM_EMBEDDING_MODEL=text-embedding-3-small && \
 	export IAI_LITELLM_PROJECT_NAME=utilities-tests && \
 	docker compose up -d --wait && \
-	PACKAGE_DIRS="logging,metrics,file_store,litellm,auth"; \
+	PACKAGE_DIRS="logging,otel,metrics,file_store,litellm,auth"; \
 	IFS=,; for dir in $$PACKAGE_DIRS; do \
 	uv run pytest \
 		src/i_dot_ai_utilities/$$dir \
@@ -40,5 +40,14 @@ test-logging:
 		src/i_dot_ai_utilities/logging \
 		--cov-config=.coveragerc \
 		--cov src/i_dot_ai_utilities/logging \
+		--cov-report term-missing \
+		--cov-fail-under 75
+
+# Run the native OpenTelemetry module's tests only.
+test-otel:
+	uv run pytest \
+		src/i_dot_ai_utilities/otel \
+		--cov-config=.coveragerc \
+		--cov src/i_dot_ai_utilities/otel \
 		--cov-report term-missing \
 		--cov-fail-under 75

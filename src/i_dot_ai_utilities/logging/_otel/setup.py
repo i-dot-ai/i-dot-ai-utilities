@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import warnings
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import metrics, trace
@@ -180,7 +181,13 @@ def _configure_logs_bridge(resource: Resource) -> None:
         provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(**kwargs)))
         set_logger_provider(provider)
         # Stdlib bridge for code paths that use logging.getLogger().
-        handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="`LoggingHandler` in `opentelemetry-sdk` is deprecated.*",
+                category=DeprecationWarning,
+            )
+            handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
         logging.getLogger().addHandler(handler)
     except Exception:  # noqa: BLE001 - bootstrap must not crash the app
         import logging  # noqa: PLC0415
