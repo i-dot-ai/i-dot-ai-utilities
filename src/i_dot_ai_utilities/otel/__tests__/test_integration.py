@@ -125,7 +125,10 @@ class TestLambdaEndToEnd:
 
             # Standard code.* attributes from SDK LoggingHandler; no sensitive event fields
             attrs = record.attributes
-            assert attrs["application"] == "casework"
+            assert attrs["i_ai.auth.application"] == "casework"
+            assert attrs["i_ai.unnamespaced.mode"] == "ok"
+            assert "mode" not in attrs
+            assert proc.stderr.count("log attribute 'mode' is not an OpenTelemetry semantic convention") == 1
             assert "code.file.path" in attrs
             assert attrs["code.function.name"] == "lambda_handler"
             assert isinstance(attrs["code.line.number"], int)
@@ -217,7 +220,7 @@ class TestLambdaEndToEnd:
 
             assert proc.stdout == ""
             assert len(server.requests_for_path("/v1/logs")) == 1
-            apps = [rec.attributes.get("application") for rec in server.log_records]
+            apps = [rec.attributes.get("i_ai.auth.application") for rec in server.log_records]
             assert apps == ["first-invoke", "second-invoke"]
 
     def test_unreachable_endpoint_respects_timeout_opens_breaker_and_emits_emf_once(self) -> None:

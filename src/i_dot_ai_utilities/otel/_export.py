@@ -1,23 +1,25 @@
-"""Tracked OTLP log export and outage circuit breaker for the native OTel track."""
+"""OTLP log exporters and processors: failure reporting, plus the Lambda outage circuit breaker."""
 
 from __future__ import annotations
 
-import os
 import threading
 import time
+from copy import copy
 from typing import TYPE_CHECKING, Final
 
-from opentelemetry.sdk._logs import LogRecordProcessor, ReadWriteLogRecord
+from opentelemetry.context import Context
+from opentelemetry.sdk._logs import LogRecordProcessor, ReadableLogRecord, ReadWriteLogRecord
 from opentelemetry.sdk._logs.export import (
     BatchLogRecordProcessor,
     LogRecordExporter,
     LogRecordExportResult,
 )
+from opentelemetry.sdk.resources import Resource
+
+from i_dot_ai_utilities.otel._environment import env_number
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-    from opentelemetry.sdk._logs import ReadableLogRecord
 
 ENV_CIRCUIT_BREAKER_SECONDS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS"
 DEFAULT_CIRCUIT_BREAKER_SECONDS: Final[float] = 30.0
@@ -25,14 +27,7 @@ DEFAULT_CIRCUIT_BREAKER_SECONDS: Final[float] = 30.0
 
 def resolve_circuit_breaker_seconds() -> float:
     """Return the open-circuit duration in seconds from the environment."""
-    raw = os.environ.get(ENV_CIRCUIT_BREAKER_SECONDS)
-    if not raw:
-        return DEFAULT_CIRCUIT_BREAKER_SECONDS
-    try:
-        value = float(raw)
-    except ValueError:
-        return DEFAULT_CIRCUIT_BREAKER_SECONDS
-    return value if value >= 0.0 else DEFAULT_CIRCUIT_BREAKER_SECONDS
+    return env_number(ENV_CIRCUIT_BREAKER_SECONDS, DEFAULT_CIRCUIT_BREAKER_SECONDS)
 
 
 class ExportCircuitBreaker:
@@ -67,6 +62,33 @@ class ExportCircuitBreaker:
             self._open_until = self._clock() + self._open_seconds
 
 
+class FailureReportingExporter(LogRecordExporter):
+    """Wraps a ``LogRecordExporter`` and calls ``on_failure`` when an export fails or raises.
+
+    Used by long-running runtimes, where exports run on the SDK's background
+    thread and never block the application.
+    """
+
+    def __init__(self, delegate: LogRecordExporter, on_failure: Callable[[str], None]) -> None:
+        self._delegate = delegate
+        self._on_failure = on_failure
+
+    def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+        try:
+            result = self._delegate.export(batch)
+        except Exception:  # noqa: BLE001 - exporter contract catches all export errors
+            result = LogRecordExportResult.FAILURE
+        if result is not LogRecordExportResult.SUCCESS:
+            self._on_failure("export_failure")
+        return result
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return bool(self._delegate.force_flush(timeout_millis))
+
+    def shutdown(self) -> None:
+        self._delegate.shutdown()
+
+
 class TrackedLogRecordExporter(LogRecordExporter):
     """Wraps a ``LogRecordExporter`` and records export outcomes on the breaker."""
 
@@ -79,6 +101,10 @@ class TrackedLogRecordExporter(LogRecordExporter):
         self._breaker = breaker
         self._lock = threading.Lock()
         self._failed_since_reset = False
+
+    @property
+    def breaker(self) -> ExportCircuitBreaker:
+        return self._breaker
 
     def reset_window(self) -> None:
         with self._lock:
@@ -127,6 +153,8 @@ class TrackedBatchLogRecordProcessor(LogRecordProcessor):
     def __init__(self, exporter: TrackedLogRecordExporter) -> None:
         self._exporter = exporter
         self._processor = BatchLogRecordProcessor(exporter)
+        # SDK internal: the bounded deque behind ``BatchLogRecordProcessor``. A unit
+        # test asserts it exists, so an SDK upgrade that removes it fails CI.
         batch_processor = getattr(self._processor, "_batch_processor", None)
         self._queue = getattr(batch_processor, "_queue", None)
 
@@ -135,15 +163,9 @@ class TrackedBatchLogRecordProcessor(LogRecordProcessor):
         return self._exporter
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
-        if self._exporter._breaker.is_open() and self._queue is not None:  # noqa: SLF001
+        if self._exporter.breaker.is_open() and self._queue is not None:
             # Do not wake the background export worker while the breaker is open;
             # the bounded deque drops the oldest record once it is full.
-            from copy import copy  # noqa: PLC0415
-
-            from opentelemetry.context import Context  # noqa: PLC0415
-            from opentelemetry.sdk._logs import ReadableLogRecord  # noqa: PLC0415
-            from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
-
             resource = log_record.resource if log_record.resource is not None else Resource.create({})
             api_log_record = copy(log_record.log_record)
             api_log_record.context = Context()
@@ -169,6 +191,7 @@ __all__ = [
     "DEFAULT_CIRCUIT_BREAKER_SECONDS",
     "ENV_CIRCUIT_BREAKER_SECONDS",
     "ExportCircuitBreaker",
+    "FailureReportingExporter",
     "TrackedBatchLogRecordProcessor",
     "TrackedLogRecordExporter",
     "resolve_circuit_breaker_seconds",

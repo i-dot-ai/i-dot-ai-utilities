@@ -20,8 +20,7 @@ from opentelemetry.sdk._logs.export import (
 import i_dot_ai_utilities.otel as public_otel
 from i_dot_ai_utilities.otel._configuration import (
     _ExcludeInternalOtelFilter,
-    _install_root_handler_and_configure_provider,
-    _reset_for_tests,
+    _install_root_handler,
     configure_otel,
     detect_runtime,
 )
@@ -29,8 +28,8 @@ from i_dot_ai_utilities.otel._emf import (
     EMF_EVENT_NAME,
     EMF_METRIC_NAME,
     EMF_NAMESPACE,
-    emit_lambda_export_failure,
 )
+from i_dot_ai_utilities.otel._environment import ENV_KEEP_STDOUT_LOGS
 from i_dot_ai_utilities.otel._export import (
     DEFAULT_CIRCUIT_BREAKER_SECONDS,
     ENV_CIRCUIT_BREAKER_SECONDS,
@@ -42,7 +41,7 @@ from i_dot_ai_utilities.otel._export import (
 from i_dot_ai_utilities.otel._lambda import (
     DEFAULT_FLUSH_MARGIN_MS,
     ENV_FLUSH_MARGIN_MS,
-    ENV_KEEP_STDOUT_LOGS,
+    emit_lambda_export_failure,
     flush_lambda_logs,
     is_lambda_runtime_stdout_handler,
     remove_lambda_runtime_stdout_handlers,
@@ -52,16 +51,9 @@ from i_dot_ai_utilities.otel._lambda import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
     from opentelemetry.sdk._logs import ReadableLogRecord
-
-
-@pytest.fixture(autouse=True)
-def _clean_state() -> Iterator[None]:
-    _reset_for_tests()
-    yield
-    _reset_for_tests()
 
 
 class _FakeClock:
@@ -350,8 +342,14 @@ class TestLambdaHelpers:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
+        for name in ("AWS_LAMBDA_FUNCTION_NAME", "ECS_CONTAINER_METADATA_URI_V4", "AWS_BATCH_JOB_ID"):
+            monkeypatch.delenv(name, raising=False)
         assert detect_runtime() == "local"
+        monkeypatch.setenv("AWS_BATCH_JOB_ID", "job-1")
+        assert detect_runtime() == "ecs"
+        monkeypatch.delenv("AWS_BATCH_JOB_ID")
+        monkeypatch.setenv("ECS_CONTAINER_METADATA_URI_V4", "http://169.254.170.2/v4/abc")
+        assert detect_runtime() == "ecs"
         assert detect_runtime("lambda") == "lambda"
 
         monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", "my-fn")
@@ -369,8 +367,8 @@ class TestLambdaHelpers:
         assert otel_filter.filter(root_otel_rec) is False
         assert otel_filter.filter(app_rec) is True
 
-    def test_public_surface_exposes_only_configure_otel(self) -> None:
-        assert public_otel.__all__ == ["configure_otel"]
+    def test_public_surface(self) -> None:
+        assert public_otel.__all__ == ["I_AI_NAMESPACE", "configure_otel", "iai_attribute", "validate_attributes"]
         assert public_otel.configure_otel is configure_otel
 
     def test_library_loggers_default_to_warning_unless_app_set_a_level(self) -> None:
@@ -383,7 +381,7 @@ class TestLambdaHelpers:
         for name in names:
             logging.getLogger(name).setLevel(logging.NOTSET)
         logging.getLogger("urllib3").setLevel(logging.INFO)
-        handler = _install_root_handler_and_configure_provider(provider, "local")
+        handler = _install_root_handler(provider)
         try:
             logging.getLogger("botocore.credentials").info("Found credentials")
             logging.getLogger("botocore.credentials").warning("botocore-warning")

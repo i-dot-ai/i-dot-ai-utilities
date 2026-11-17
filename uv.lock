@@ -1250,7 +1250,28 @@ otel-fastapi = [
     { name = "opentelemetry-sdk" },
     { name = "opentelemetry-sdk-extension-aws" },
 ]
-otel-lambda = [
+otel-native = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-distro" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-propagator-aws-xray" },
+    { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-sdk-extension-aws" },
+    { name = "wrapt" },
+]
+otel-native-fastapi = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-distro" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-propagator-aws-xray" },
+    { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-sdk-extension-aws" },
+    { name = "wrapt" },
+]
+otel-native-lambda = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-distro" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -1260,15 +1281,7 @@ otel-lambda = [
     { name = "opentelemetry-propagator-aws-xray" },
     { name = "opentelemetry-sdk" },
     { name = "opentelemetry-sdk-extension-aws" },
-]
-otel-native = [
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-distro" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-instrumentation" },
-    { name = "opentelemetry-propagator-aws-xray" },
-    { name = "opentelemetry-sdk" },
-    { name = "opentelemetry-sdk-extension-aws" },
+    { name = "wrapt" },
 ]
 
 [package.dev-dependencies]
@@ -1322,7 +1335,8 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'auth'", specifier = ">=0.28.1" },
     { name = "i-dot-ai-utilities", extras = ["otel"], marker = "extra == 'otel-django'" },
     { name = "i-dot-ai-utilities", extras = ["otel"], marker = "extra == 'otel-fastapi'" },
-    { name = "i-dot-ai-utilities", extras = ["otel-native"], marker = "extra == 'otel-lambda'" },
+    { name = "i-dot-ai-utilities", extras = ["otel-native"], marker = "extra == 'otel-native-fastapi'" },
+    { name = "i-dot-ai-utilities", extras = ["otel-native"], marker = "extra == 'otel-native-lambda'" },
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.4.0" },
     { name = "langfuse", marker = "extra == 'litellm'", specifier = ">=3.4.0" },
     { name = "litellm", marker = "extra == 'all'", specifier = "==1.79.0" },
@@ -1333,30 +1347,31 @@ requires-dist = [
     { name = "opentelemetry-api", marker = "extra == 'all'", specifier = ">=1.45.0" },
     { name = "opentelemetry-api", marker = "extra == 'litellm'", specifier = ">=1.37.0" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.27" },
-    { name = "opentelemetry-api", marker = "extra == 'otel-native'", specifier = ">=1.45.0" },
+    { name = "opentelemetry-api", marker = "extra == 'otel-native'", specifier = ">=1.45.0,<1.46" },
     { name = "opentelemetry-distro", marker = "extra == 'all'", specifier = ">=0.66b1" },
-    { name = "opentelemetry-distro", marker = "extra == 'otel-native'", specifier = ">=0.66b1" },
+    { name = "opentelemetry-distro", marker = "extra == 'otel-native'", specifier = ">=0.66b1,<0.67" },
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'litellm'", specifier = ">=1.37.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'all'", specifier = ">=1.45.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.27" },
-    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel-native'", specifier = ">=1.45.0" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel-native'", specifier = ">=1.45.0,<1.46" },
     { name = "opentelemetry-instrumentation", marker = "extra == 'all'", specifier = ">=0.66b1" },
-    { name = "opentelemetry-instrumentation", marker = "extra == 'otel-native'", specifier = ">=0.66b1" },
+    { name = "opentelemetry-instrumentation", marker = "extra == 'otel-native'", specifier = ">=0.66b1,<0.67" },
     { name = "opentelemetry-instrumentation-aws-lambda", marker = "extra == 'all'", specifier = ">=0.66b1" },
-    { name = "opentelemetry-instrumentation-aws-lambda", marker = "extra == 'otel-lambda'", specifier = ">=0.66b1" },
+    { name = "opentelemetry-instrumentation-aws-lambda", marker = "extra == 'otel-native-lambda'", specifier = ">=0.66b1,<0.67" },
     { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'all'", specifier = ">=0.66b1" },
-    { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'otel-lambda'", specifier = ">=0.66b1" },
+    { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'otel-native-lambda'", specifier = ">=0.66b1,<0.67" },
     { name = "opentelemetry-instrumentation-django", marker = "extra == 'all'", specifier = ">=0.66b1" },
     { name = "opentelemetry-instrumentation-django", marker = "extra == 'otel-django'", specifier = ">=0.48b0" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'all'", specifier = ">=0.66b1" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel-fastapi'", specifier = ">=0.48b0" },
+    { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel-native-fastapi'", specifier = ">=0.66b1,<0.67" },
     { name = "opentelemetry-propagator-aws-xray", marker = "extra == 'all'", specifier = ">=1.0.2" },
     { name = "opentelemetry-propagator-aws-xray", marker = "extra == 'otel'", specifier = ">=1.0.1" },
     { name = "opentelemetry-propagator-aws-xray", marker = "extra == 'otel-native'", specifier = ">=1.0.2" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.45.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'litellm'", specifier = ">=1.37.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.27" },
-    { name = "opentelemetry-sdk", marker = "extra == 'otel-native'", specifier = ">=1.45.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel-native'", specifier = ">=1.45.0,<1.46" },
     { name = "opentelemetry-sdk-extension-aws", marker = "extra == 'all'", specifier = ">=2.1.0" },
     { name = "opentelemetry-sdk-extension-aws", marker = "extra == 'otel'", specifier = ">=2.0.0" },
     { name = "opentelemetry-sdk-extension-aws", marker = "extra == 'otel-native'", specifier = ">=2.1.0" },
@@ -1373,8 +1388,9 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.2" },
     { name = "structlog", specifier = ">=25.4.0" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
+    { name = "wrapt", marker = "extra == 'otel-native'", specifier = ">=1.14,<3" },
 ]
-provides-extras = ["dev", "auth", "file-store", "litellm", "metrics", "django", "otel", "otel-django", "otel-fastapi", "otel-native", "otel-lambda", "all"]
+provides-extras = ["dev", "auth", "file-store", "litellm", "metrics", "django", "otel", "otel-django", "otel-fastapi", "otel-native", "otel-native-lambda", "otel-native-fastapi", "all"]
 
 [package.metadata.requires-dev]
 dev = [

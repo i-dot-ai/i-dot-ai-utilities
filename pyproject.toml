@@ -113,25 +113,35 @@ otel_fastapi = [
     "opentelemetry-instrumentation-fastapi>=0.48b0",
 ]
 
-# Native OpenTelemetry core - standard OTel SDK, OTLP/HTTP export, distro
-# configurator, W3C + AWS X-Ray propagation, and AWS resource detectors
-# (i_dot_ai_utilities.otel.configure_otel).
+# Native OpenTelemetry core, shared by every runtime - standard OTel SDK,
+# OTLP/HTTP export, distro configurator, W3C + AWS X-Ray propagation, and AWS
+# resource detectors (i_dot_ai_utilities.otel.configure_otel). Enough on its own
+# for ECS, AWS Batch and local runs; add a framework extra for auto-instrumentation.
 otel_native = [
-    "opentelemetry-api>=1.45.0",
-    "opentelemetry-sdk>=1.45.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.45.0",
-    "opentelemetry-distro>=0.66b1",
-    "opentelemetry-instrumentation>=0.66b1",
+    "opentelemetry-api>=1.45.0,<1.46",
+    "opentelemetry-sdk>=1.45.0,<1.46",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.0,<1.46",
+    "opentelemetry-distro>=0.66b1,<0.67",
+    "opentelemetry-instrumentation>=0.66b1,<0.67",
     "opentelemetry-propagator-aws-xray>=1.0.2",
     "opentelemetry-sdk-extension-aws>=2.1.0",
+    "wrapt>=1.14,<3",
 ]
 
 # Native OpenTelemetry for AWS Lambda - adds AWS Lambda and botocore
 # auto-instrumentation without pulling Lambda dependencies into container extras.
-otel_lambda = [
+otel_native_lambda = [
     "i-dot-ai-utilities[otel_native]",
-    "opentelemetry-instrumentation-aws-lambda>=0.66b1",
-    "opentelemetry-instrumentation-botocore>=0.66b1",
+    "opentelemetry-instrumentation-aws-lambda>=0.66b1,<0.67",
+    "opentelemetry-instrumentation-botocore>=0.66b1,<0.67",
+]
+
+# Native OpenTelemetry framework extras - each adds one instrumentation package,
+# which configure_otel() discovers and enables automatically. Add new frameworks
+# the same way: `otel_native_<framework> = ["i-dot-ai-utilities[otel_native]", "<instrumentation>"]`.
+otel_native_fastapi = [
+    "i-dot-ai-utilities[otel_native]",
+    "opentelemetry-instrumentation-fastapi>=0.66b1,<0.67",
 ]
 
 # Install all optional modules

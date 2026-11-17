@@ -8,7 +8,7 @@ from typing import Any
 
 from opentelemetry import trace
 
-from i_dot_ai_utilities.otel import configure_otel
+from i_dot_ai_utilities.otel import configure_otel, iai_attribute
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -30,7 +30,8 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     logger.info(
         "Authorisation request started for %s",
         event.get("application", "demo-app"),
-        extra={"application": event.get("application", "demo-app"), "mode": mode},
+        # ``mode`` is deliberately not namespaced, to prove it is exported as ``i_ai.unnamespaced.mode``.
+        extra={iai_attribute("auth.application"): event.get("application", "demo-app"), "mode": mode},
     )
 
     if mode == "caught_error":
@@ -51,7 +52,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     if mode == "batch_burst":
         count = int(event.get("count", 5))
         for idx in range(count):
-            logger.info("Batch burst line %d", idx, extra={"seq": idx})
+            logger.info("Batch burst line %d", idx, extra={iai_attribute("auth.burst.seq"): idx})
 
     return {
         "statusCode": 200,

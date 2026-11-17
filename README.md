@@ -15,7 +15,8 @@ When installing the package, the base package comes with only the `logger` modul
 - otel_django _(pre-release)_
 - otel_fastapi _(pre-release)_
 - otel_native _(pre-release)_
-- otel_lambda _(pre-release)_
+- otel_native_lambda _(pre-release)_
+- otel_native_fastapi _(pre-release)_
 - django _(pre-release)_
 - all
 
@@ -31,7 +32,7 @@ uv pip install "i-dot-ai-utilities[all]"
 
 Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
 
-> ⚠️ **The `otel*` and `django` extras are pre-release; pass `--pre` (or pin the exact pre-release version) to install them.** `[otel_native]` and `[otel_lambda]` target the `otel-gateway` logs pipeline via `i_dot_ai_utilities.otel.configure_otel`. The legacy `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` extras remain on the existing structlog/PoC bridge until the container follow-ups land. `[all]` pulls in the pre-release extras too, so it also requires `--pre` during the pre-release window.
+> ⚠️ **The `otel*` and `django` extras are pre-release; pass `--pre` (or pin the exact pre-release version) to install them.** The `otel_native*` extras are the supported OpenTelemetry path (`i_dot_ai_utilities.otel`). The legacy `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` extras belong to the older structlog bridge and will be removed. `[all]` pulls in the pre-release extras too, so it also requires `--pre` during the pre-release window.
 
 ## Features
 
@@ -71,19 +72,15 @@ As the end-user, you'll have to make sure that the API key issued to you by Lite
 
 More information on usage and setup can be found in the [litellm library readme](./src/i_dot_ai_utilities/litellm/README.md).
 
-#### OpenTelemetry & Django middleware
+#### OpenTelemetry
 
-For Python AWS Lambdas sending structured logs to the internal `otel-gateway`, install `[otel_lambda]` and call `i_dot_ai_utilities.otel.configure_otel` after defining your handler. That native path configures the standard OpenTelemetry SDK, Python `logging` handler, AWS Lambda and botocore auto-instrumentation, synchronous per-invocation log flushing, and an outage circuit breaker without routing through `StructuredLogger`. `[otel_native]` provides the common SDK and OTLP/HTTP dependencies without the Lambda instrumentation packages.
+Use `i_dot_ai_utilities.otel` for new work. Install `[otel_native]` plus one extra per framework or platform (`[otel_native_lambda]`, `[otel_native_fastapi]`), then call `configure_otel()` at start-up. It detects AWS Lambda, ECS (Fargate or EC2), AWS Batch or a local run, sends Python `logging` output to the `otel-gateway` over OTLP, auto-instruments installed libraries, and enforces the `i_ai` namespace for custom attributes.
 
-On Lambda, each flush is capped at `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` of wall-clock time, DNS lookup included. While the breaker is open, every skipped flush still emits the `i-dot-ai/otel` `ExportFailures` metric. The runtime's stdout handler stays in place when `OTEL_LOGS_EXPORTER=none`. Set `I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS=true` to keep stdout logs alongside OTLP as a fallback.
+You can find usage details in the [otel library readme](./src/i_dot_ai_utilities/otel/README.md).
 
-The legacy `otel` extra (`i_dot_ai_utilities.logging.otel`) remains unchanged for the existing framework-bridge track (`configure_otel_for_django` / `configure_otel_for_fastapi` / `configure_otel_for_lambda`) that wires traces, metrics, and the structlog log bridge. Add `otel_django` or `otel_fastapi` for the matching auto-instrumentation.
+#### Legacy OpenTelemetry bridge & Django middleware
 
-The `django` extra adds request-lifecycle middleware: `StructuredLoggingMiddlewareOTel` for per-request structured logging and `DjangoUserIdMiddleware` for authenticated-user attribution. For a Django app on the legacy bridge track, install `[django,otel_django]`.
-
-> ⚠️ **Pre-release** (see the [Installation](#installation) note): `[otel_native]` and `[otel_lambda]` target the `otel-gateway` logs pipeline; the existing `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` bridge extras stay on their PoC behaviour until the container follow-ups.
-
-You can find usage details in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+The `otel` extra (`i_dot_ai_utilities.logging.otel`) and the `django` middleware are the earlier structlog-based bridge. They are unchanged and will be removed; do not use them for new services. See the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
 
 ### Future features:
 

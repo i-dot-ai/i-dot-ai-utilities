@@ -1,4 +1,10 @@
-"""AWS Lambda runtime defaults, instrumentation, stdout suppression, and log flushing."""
+"""AWS Lambda runtime: env defaults, resource, circuit-breaker export, and per-invocation log flushing.
+
+Lambda freezes the process as soon as the handler returns, so the SDK's
+background export thread cannot be relied on. Instead the handler is wrapped
+to flush logs synchronously, bounded by the export timeout and skipped while
+the outage circuit breaker is open.
+"""
 
 from __future__ import annotations
 
@@ -10,36 +16,40 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Any, Final
 
-from opentelemetry._logs import get_logger_provider
-from opentelemetry.environment_variables import (
-    OTEL_LOGS_EXPORTER,
-    OTEL_METRICS_EXPORTER,
-    OTEL_PROPAGATORS,
-    OTEL_PYTHON_ID_GENERATOR,
-    OTEL_TRACES_EXPORTER,
-)
 from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
     OTEL_BLRP_MAX_QUEUE_SIZE,
     OTEL_BLRP_SCHEDULE_DELAY,
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
-    OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TIMEOUT,
 )
+from opentelemetry.sdk.extension.aws.resource import AwsLambdaResourceDetector
 from wrapt import wrap_function_wrapper
 
-from i_dot_ai_utilities.otel._emf import emit_lambda_export_failure
+from i_dot_ai_utilities.otel._emf import emit_export_failure
+from i_dot_ai_utilities.otel._environment import env_number, keep_stdout_logs, logs_export_disabled
+from i_dot_ai_utilities.otel._export import (
+    ExportCircuitBreaker,
+    TrackedBatchLogRecordProcessor,
+    TrackedLogRecordExporter,
+    resolve_circuit_breaker_seconds,
+)
+from i_dot_ai_utilities.otel._runtime import (
+    Runtime,
+    apply_aws_trace_env_defaults,
+    apply_common_env_defaults,
+    resource_attributes_from,
+    unregister_sdk_atexit,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from i_dot_ai_utilities.otel._export import (
-        ExportCircuitBreaker,
-        TrackedBatchLogRecordProcessor,
-    )
+    from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
+    from opentelemetry.sdk._logs.export import LogRecordExporter
+    from opentelemetry.util.types import AttributeValue
 
 ENV_FLUSH_MARGIN_MS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS"
-ENV_KEEP_STDOUT_LOGS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS"
 DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
@@ -56,41 +66,13 @@ _LAMBDA_HANDLER_MARKER: Final[str] = "_i_dot_ai_otel_lambda_wrapped"
 _inflight_flush: threading.Thread | None = None
 
 
-def keep_stdout_logs_requested() -> bool:
-    """Return True when the app opts in to keeping Lambda stdout logs alongside OTLP."""
-    return os.environ.get(ENV_KEEP_STDOUT_LOGS, "").strip().lower() in {"1", "true", "yes"}
-
-
-def _reset_for_tests() -> None:
-    global _inflight_flush  # noqa: PLW0603
-    _inflight_flush = None
-
-
-def has_otlp_logs_endpoint() -> bool:
-    """Return True when a base or logs-specific OTLP endpoint is configured."""
-    return bool(
-        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "").strip()
-        or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+def emit_lambda_export_failure(reason: str) -> None:
+    """Emit the EMF ``ExportFailures`` line with the ``FunctionName`` dimension."""
+    emit_export_failure(
+        reason,
+        dimension="FunctionName",
+        value=os.environ.get("AWS_LAMBDA_FUNCTION_NAME") or "unknown",
     )
-
-
-def apply_lambda_env_defaults(*, endpoint_configured: bool) -> None:
-    """Apply Lambda-specific OpenTelemetry environment defaults with ``setdefault``."""
-    os.environ.setdefault(OTEL_TRACES_EXPORTER, "none")
-    os.environ.setdefault(OTEL_METRICS_EXPORTER, "none")
-    os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp" if endpoint_configured else "none")
-    os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
-    if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
-    os.environ.setdefault(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE)
-    os.environ.setdefault(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_MAX_QUEUE_SIZE)
-    os.environ.setdefault(OTEL_BLRP_SCHEDULE_DELAY, DEFAULT_LAMBDA_SCHEDULE_DELAY_MILLIS)
-    os.environ.setdefault(
-        OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT,
-        DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS,
-    )
-    os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
-    os.environ.setdefault(OTEL_PROPAGATORS, "xray,tracecontext,baggage")
 
 
 def is_lambda_runtime_stdout_handler(handler: logging.Handler) -> bool:
@@ -109,7 +91,7 @@ def remove_lambda_runtime_stdout_handlers(
     Keeps them when OTLP log export is disabled, so turning export off never
     turns application logging off, or when the app opts in to stdout as a fallback.
     """
-    if os.environ.get(OTEL_LOGS_EXPORTER, "").strip().lower() in {"", "none"} or keep_stdout_logs_requested():
+    if logs_export_disabled() or keep_stdout_logs(default=False):
         return 0
     root = root_logger if root_logger is not None else logging.getLogger()
     removed = 0
@@ -142,14 +124,7 @@ def resolve_logs_export_timeout_ms() -> int:
 
 def resolve_flush_margin_ms() -> int:
     """Return the remaining-time safety margin in milliseconds."""
-    raw = os.environ.get(ENV_FLUSH_MARGIN_MS)
-    if not raw:
-        return DEFAULT_FLUSH_MARGIN_MS
-    try:
-        margin = int(raw)
-    except ValueError:
-        return DEFAULT_FLUSH_MARGIN_MS
-    return margin if margin >= 0 else DEFAULT_FLUSH_MARGIN_MS
+    return int(env_number(ENV_FLUSH_MARGIN_MS, DEFAULT_FLUSH_MARGIN_MS))
 
 
 def _remaining_time_millis(context: Any) -> int | None:
@@ -167,11 +142,7 @@ def _remaining_time_millis(context: Any) -> int | None:
 
 def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outcome: dict[str, bool]) -> None:
     try:
-        provider = get_logger_provider()
-        if hasattr(provider, "force_flush"):
-            outcome["flushed"] = bool(provider.force_flush(timeout_ms))
-        else:
-            outcome["flushed"] = processor.force_flush(timeout_ms)
+        outcome["flushed"] = processor.force_flush(timeout_ms)
     except Exception:  # noqa: BLE001 - flush must never break the handler
         outcome["flushed"] = False
 
@@ -253,25 +224,20 @@ def resolve_lambda_handler_target() -> tuple[str, str] | None:
     return module_name, function_name
 
 
-def instrument_lambda_runtime(
+def instrument_lambda_handler(
     *,
     processor: TrackedBatchLogRecordProcessor | None,
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> None:
-    """Instrument botocore and the Lambda handler, then install the outer log flush wrapper."""
+    """Instrument the Lambda handler, then install the outer log flush wrapper around it.
+
+    Raises ``ImportError`` when ``opentelemetry-instrumentation-aws-lambda`` is
+    missing, so a Lambda deployed without the ``[otel_native_lambda]`` extra fails fast.
+    """
     from opentelemetry.instrumentation.aws_lambda import (  # noqa: PLC0415
         AwsLambdaInstrumentor,
     )
-
-    with contextlib.suppress(ModuleNotFoundError):
-        from opentelemetry.instrumentation.botocore import (  # noqa: PLC0415
-            BotocoreInstrumentor,
-        )
-
-        botocore_instrumentor = BotocoreInstrumentor()
-        if not botocore_instrumentor.is_instrumented_by_opentelemetry:
-            botocore_instrumentor.instrument()
 
     target = resolve_lambda_handler_target()
     if target is None:
@@ -328,18 +294,74 @@ def instrument_lambda_runtime(
             setattr(wrapped_handler, _LAMBDA_HANDLER_MARKER, True)
 
 
+class LambdaRuntime(Runtime):
+    """AWS Lambda: synchronous, time-bounded flush at the end of every invocation."""
+
+    name = "lambda"
+    self_instrumented = frozenset({"aws-lambda"})
+    missing_endpoint_message = (
+        "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set on Lambda; "
+        "continuing with OTLP log export disabled."
+    )
+
+    def __init__(self, *, service_name: str | None) -> None:
+        super().__init__(service_name=service_name)
+        self.breaker = ExportCircuitBreaker(open_seconds=resolve_circuit_breaker_seconds())
+        self.processor: TrackedBatchLogRecordProcessor | None = None
+
+    def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
+        apply_common_env_defaults(logs_exporter="otlp" if endpoint_configured else "none")
+        apply_aws_trace_env_defaults()
+        if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
+            os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
+        os.environ.setdefault(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE)
+        os.environ.setdefault(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_MAX_QUEUE_SIZE)
+        os.environ.setdefault(OTEL_BLRP_SCHEDULE_DELAY, DEFAULT_LAMBDA_SCHEDULE_DELAY_MILLIS)
+        os.environ.setdefault(
+            OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT,
+            DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS,
+        )
+
+    def resource_attributes(self) -> dict[str, AttributeValue]:
+        return resource_attributes_from(AwsLambdaResourceDetector().detect())
+
+    def log_record_processor(self, exporter: LogRecordExporter) -> LogRecordProcessor:
+        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(exporter, self.breaker))
+        if self.processor is None:
+            self.processor = processor
+        return processor
+
+    def post_configure(self, provider: LoggerProvider) -> None:
+        # Lambda freezes and terminates processes outside invocation boundaries;
+        # an ``atexit`` shutdown would bypass the outage circuit breaker and drain
+        # queued records with a blocking export on exit.
+        unregister_sdk_atexit(provider)
+        remove_lambda_runtime_stdout_handlers()
+        instrument_lambda_handler(processor=self.processor, breaker=self.breaker)
+
+    def on_reconfigure(self) -> None:
+        # A second call after the handler is defined still wraps it, if the first call ran too early.
+        remove_lambda_runtime_stdout_handlers()
+        instrument_lambda_handler(processor=self.processor, breaker=self.breaker)
+
+
+def reset_inflight_flush() -> None:
+    """Forget an abandoned flush thread (used by tests)."""
+    global _inflight_flush  # noqa: PLW0603
+    _inflight_flush = None
+
+
 __all__ = [
     "DEFAULT_FLUSH_MARGIN_MS",
     "DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS",
     "ENV_FLUSH_MARGIN_MS",
-    "ENV_KEEP_STDOUT_LOGS",
-    "apply_lambda_env_defaults",
+    "LambdaRuntime",
+    "emit_lambda_export_failure",
     "flush_lambda_logs",
-    "has_otlp_logs_endpoint",
-    "instrument_lambda_runtime",
+    "instrument_lambda_handler",
     "is_lambda_runtime_stdout_handler",
-    "keep_stdout_logs_requested",
     "remove_lambda_runtime_stdout_handlers",
+    "reset_inflight_flush",
     "resolve_flush_margin_ms",
     "resolve_lambda_handler_target",
     "resolve_logs_export_timeout_ms",
