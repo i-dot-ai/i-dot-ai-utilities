@@ -195,3 +195,42 @@ class TestSigterm:
             proc.communicate(timeout=15)
             assert proc.returncode == 128 + signal.SIGTERM
             assert [rec.body for rec in server.log_records] == ["before-sigterm"]
+
+    def test_flush_otel_exports_when_the_server_dies_without_atexit(self) -> None:
+        # uvicorn before 0.47 sets its handler before importing the app, then restores the
+        # default and re-raises SIGTERM after its graceful shutdown, so atexit never runs.
+        script = (
+            "import logging, signal, sys, time\n"
+            "from i_dot_ai_utilities.otel import configure_otel, flush_otel\n"
+            "stop = []\n"
+            "signal.signal(signal.SIGTERM, lambda signum, frame: stop.append(signum))\n"
+            "configure_otel(service_name='sample-api')\n"
+            "logging.getLogger('api').info('before-sigterm')\n"
+            "print('READY', flush=True, file=sys.stderr)\n"
+            "while not stop:\n"
+            "    time.sleep(0.05)\n"
+            "print(f'FLUSHED={flush_otel()}', flush=True, file=sys.stderr)\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_DFL)\n"
+            "signal.raise_signal(signal.SIGTERM)\n"
+        )
+        with OtlpCaptureServer() as server:
+            proc = subprocess.Popen(  # noqa: S603
+                [sys.executable, "-c", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=_container_env(
+                    {
+                        "AWS_BATCH_JOB_ID": "job-old-uvicorn",
+                        "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                        "OTEL_BLRP_SCHEDULE_DELAY": "60000",
+                    }
+                ),
+            )
+            assert proc.stderr is not None
+            assert "READY" in proc.stderr.readline()
+            proc.send_signal(signal.SIGTERM)
+            _, stderr = proc.communicate(timeout=15)
+            assert proc.returncode == -signal.SIGTERM
+            assert "FLUSHED=True" in stderr
+            assert [rec.body for rec in server.log_records] == ["before-sigterm"]

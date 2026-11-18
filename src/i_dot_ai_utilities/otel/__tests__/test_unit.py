@@ -368,7 +368,13 @@ class TestLambdaHelpers:
         assert otel_filter.filter(app_rec) is True
 
     def test_public_surface(self) -> None:
-        assert public_otel.__all__ == ["I_AI_NAMESPACE", "configure_otel", "iai_attribute", "validate_attributes"]
+        assert public_otel.__all__ == [
+            "I_AI_NAMESPACE",
+            "configure_otel",
+            "flush_otel",
+            "iai_attribute",
+            "validate_attributes",
+        ]
         assert public_otel.configure_otel is configure_otel
 
     def test_library_loggers_default_to_warning_unless_app_set_a_level(self) -> None:

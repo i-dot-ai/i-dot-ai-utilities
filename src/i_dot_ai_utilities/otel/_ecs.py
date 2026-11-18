@@ -17,6 +17,7 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Final
 
+from opentelemetry._logs import get_logger_provider
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_TIMEOUT,
@@ -31,6 +32,7 @@ from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaul
 from i_dot_ai_utilities.otel._stdout import install_stdout_handler
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType
 
     from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
@@ -67,6 +69,14 @@ def batch_resource_attributes() -> dict[str, AttributeValue]:
     }
 
 
+def _run_capped(target: Callable[[], object], timeout_seconds: float, *, name: str) -> bool:
+    """Run ``target`` on a daemon thread, waiting at most ``timeout_seconds``. Returns True if it finished."""
+    worker = threading.Thread(target=target, name=name, daemon=True)
+    worker.start()
+    worker.join(timeout_seconds)
+    return not worker.is_alive()
+
+
 def register_capped_shutdown(provider: LoggerProvider, timeout_seconds: float) -> None:
     """Replace the SDK's unbounded ``atexit`` shutdown with one that waits at most ``timeout_seconds``.
 
@@ -76,13 +86,26 @@ def register_capped_shutdown(provider: LoggerProvider, timeout_seconds: float) -
     remaining queued logs are dropped (they are still on stdout).
     """
     unregister_sdk_atexit(provider)
+    atexit.register(_run_capped, provider.shutdown, timeout_seconds, name="i-dot-ai-otel-shutdown")
 
-    def _shutdown() -> None:
-        worker = threading.Thread(target=provider.shutdown, name="i-dot-ai-otel-shutdown", daemon=True)
-        worker.start()
-        worker.join(timeout_seconds)
 
-    atexit.register(_shutdown)
+def flush_otel() -> bool:
+    """Export queued logs now, waiting at most ``I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`` (5 s by default).
+
+    Call it when a server shuts down, for example after ``yield`` in a FastAPI
+    lifespan. Some servers end the process without running ``atexit`` (uvicorn
+    before 0.47, and uvicorn ``--workers``), so the exit flush never runs there.
+
+    Returns True when the flush finished in time. Returns False when it timed
+    out or ``configure_otel()`` has not run. The SDK ignores its own flush
+    timeout, so the wait is capped here to keep a hung gateway from holding
+    the task past ECS ``stopTimeout``.
+    """
+    force_flush = getattr(get_logger_provider(), "force_flush", None)
+    if force_flush is None:
+        return False
+    timeout_ms = env_number(ENV_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS)
+    return _run_capped(lambda: force_flush(int(timeout_ms)), timeout_ms / 1000, name="i-dot-ai-otel-flush")
 
 
 def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
@@ -95,8 +118,10 @@ def install_sigterm_handler() -> bool:
 
     A handler that is already set is left in place. Without one, Python dies on
     SIGTERM without running ``atexit``, so queued logs would be lost when ECS or
-    Batch stops the task. uvicorn needs this handler too: after its own graceful
-    shutdown it restores the previous handler and re-raises the signal.
+    Batch stops the task. uvicorn 0.47 and later relies on this handler: after
+    its graceful shutdown it restores the previous handler and re-raises the
+    signal. Earlier uvicorn sets its own handler before importing the app, so
+    this one is skipped and the app must call :func:`flush_otel` itself.
     """
     if threading.current_thread() is not threading.main_thread():
         return False
@@ -151,6 +176,7 @@ __all__ = [
     "ENV_SHUTDOWN_TIMEOUT_MS",
     "EcsRuntime",
     "batch_resource_attributes",
+    "flush_otel",
     "install_sigterm_handler",
     "is_container_runtime",
     "register_capped_shutdown",

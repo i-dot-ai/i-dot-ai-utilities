@@ -41,15 +41,25 @@ Call `configure_otel()` before importing FastAPI. The FastAPI instrumentor works
 ```python
 # main.py
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from i_dot_ai_utilities.otel import configure_otel, iai_attribute
+from i_dot_ai_utilities.otel import configure_otel, flush_otel, iai_attribute
 
 configure_otel(service_name="casework-api")
 
 from fastapi import FastAPI  # noqa: E402
 
 logger = logging.getLogger(__name__)
-app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    yield
+    flush_otel()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/cases/{case_id}")
@@ -63,6 +73,36 @@ Every log line inside a request carries that request's `trace_id` and `span_id`.
 uvicorn's own server and access logs are not exported over OTLP. uvicorn turns off propagation on its `uvicorn` and `uvicorn.access` loggers, so they never reach the root handler and stay on uvicorn's console output only.
 
 Under gunicorn, keep `configure_otel()` at module level in the app module. With the default (no `--preload`), each worker imports the app and configures itself. With `--preload`, the SDK restarts its export thread in each worker after the fork. A uvicorn worker without `--preload` flushes its queued logs when gunicorn stops it (checked with gunicorn 27.0 and uvicorn 0.54). Unknown: whether sync workers and `--preload` workers do the same. Their logs are on stdout either way.
+
+### Flush logs on shutdown
+
+Call `flush_otel()` after `yield` in the lifespan, as in the example above. It exports the queued logs and waits at most `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`, so a hung gateway cannot hold the task past `stopTimeout`. The lifespan shutdown runs after the server has finished its open requests, so the call does not delay a response.
+
+Some servers end the process without running Python's `atexit` hooks, so the library's own exit flush never runs. Without `flush_otel()`, the logs queued since the last export (up to 1 second by default) miss the gateway when the task stops. They are still on stdout.
+
+| Server | Exit flush runs without `flush_otel()` |
+|---|---|
+| `uvicorn main:app`, uvicorn before 0.47 | No |
+| `uvicorn main:app`, uvicorn 0.47 or later | Yes |
+| `uvicorn main:app --workers N` | No |
+| gunicorn with `uvicorn.workers.UvicornWorker` | Yes |
+
+Checked with uvicorn 0.31.1, 0.46.0, 0.47.0 and 0.54.0, and gunicorn 27.0 without `--preload`. The `--workers` row was checked on uvicorn 0.54.0 only. Unknown: other servers, such as hypercorn and granian. Calling `flush_otel()` is safe on all of them.
+
+### Start the server as the container's main process
+
+ECS and Batch send SIGTERM only to the container's main process (PID 1). If that process is a shell script that starts the server in the background, the server never receives the signal. It keeps running until the task is killed at `stopTimeout`, and nothing is flushed. No library code can fix that, so fix it in the container.
+
+End an entrypoint script with `exec`, so the server replaces the shell and becomes PID 1:
+
+```bash
+#!/bin/bash
+set -e
+alembic upgrade head
+exec uvicorn backend.main:app --host 0.0.0.0 --port 8080
+```
+
+Do not start the server with `uvicorn ... &` followed by `wait`. In a Dockerfile, use the JSON form, `CMD ["uvicorn", "backend.main:app"]`, because the shell form runs the command under `/bin/sh -c`. A `uv run` prefix is fine: `uv run` passes the signal on to the server (checked with uv 0.12.3).
 
 ## Django
 
@@ -91,7 +131,7 @@ if __name__ == "__main__":
 
 When ECS or Batch stops a task it sends SIGTERM. Python's default reaction kills the process without running `atexit`, so queued logs would be lost. On the `ecs` runtime, `configure_otel()` installs a SIGTERM handler that exits with code `143` (`128 + SIGTERM`) through `sys.exit`, so `finally` blocks and the log flush run. It only does this when no SIGTERM handler is already set.
 
-This covers `uvicorn main:app` too. uvicorn imports the app before it sets its own handler, and after its graceful shutdown it restores this one and re-raises the signal.
+A web server can set its own SIGTERM handler first, or exit without running `atexit`. For a web service, call `flush_otel()` as described in [Flush logs on shutdown](#flush-logs-on-shutdown).
 
 Python waits for non-daemon threads to finish before it runs the flush. A background thread that never stops holds the process until ECS kills it, and the queued logs are lost from OTLP. Create background threads with `daemon=True`, or stop them in a `finally` block.
 
@@ -197,7 +237,7 @@ On `lambda` and `ecs`, `OTEL_PYTHON_ID_GENERATOR` defaults to `xray` and `OTEL_P
 | Variable | Default | Purpose |
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` | `5` (not set if `OTEL_EXPORTER_OTLP_TIMEOUT` is set) | Per-batch export timeout in seconds |
-| `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS` | `5000` | Longest time shutdown waits for queued logs to export |
+| `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS` | `5000` | Longest time that shutdown, and each `flush_otel()` call, waits for queued logs to export |
 | `OTEL_BLRP_SCHEDULE_DELAY` | `1000` (SDK default) | Background export interval in milliseconds |
 | `OTEL_BLRP_MAX_QUEUE_SIZE` | `2048` (SDK default) | Records buffered before the oldest are dropped |
 
@@ -249,7 +289,7 @@ On Lambda, enable `export_failures_threshold = 0` on `modules/observability/lamb
 
 Requests only add log records to a bounded in-memory queue; the SDK's background thread does the network I/O. During an outage the queue fills to `OTEL_BLRP_MAX_QUEUE_SIZE` and the oldest records are dropped from OTLP; they are still on stdout.
 
-The SDK's own shutdown waits up to 30 seconds for the export thread. That is the whole default ECS `stopTimeout` (30 seconds), leaving no time for the application's own shutdown. `configure_otel()` replaces it with a shutdown capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`. Keep that cap plus your application's own shutdown time below the task's `stopTimeout`.
+The SDK's own shutdown waits up to 30 seconds for the export thread. That is the whole default ECS `stopTimeout` (30 seconds), leaving no time for the application's own shutdown. `configure_otel()` replaces it with a shutdown capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`. `flush_otel()` uses the same cap, so a service that calls it can wait up to twice the cap while the gateway is hung: once in `flush_otel()` and once at exit. Keep that time plus your application's own shutdown time below the task's `stopTimeout`.
 
 The ECS Terraform module needs two follow-up changes for this to hold in production:
 
@@ -291,7 +331,7 @@ To support a new runtime, subclass `Runtime` in `_runtime.py`, override only the
 | `_configuration.py` | `configure_otel()`, runtime detection, root handler, process state |
 | `_runtime.py` | `Runtime` base class, `LocalRuntime`, shared env defaults |
 | `_lambda.py` | `LambdaRuntime`, handler wrapping, per-invocation flush |
-| `_ecs.py` | `EcsRuntime`, Batch attributes, capped shutdown, SIGTERM |
+| `_ecs.py` | `EcsRuntime`, Batch attributes, capped shutdown, `flush_otel()`, SIGTERM |
 | `_export.py` | Failure-reporting exporter; Lambda circuit breaker and processor |
 | `_attributes.py` | `i_ai` naming helpers, semantic convention registry, enforcement processor |
 | `_instrumentation.py` | Entry-point based auto-instrumentation |

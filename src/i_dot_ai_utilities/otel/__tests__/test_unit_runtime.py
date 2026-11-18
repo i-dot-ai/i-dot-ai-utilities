@@ -9,6 +9,8 @@ import json
 import logging
 import pkgutil
 import signal
+import threading
+import time
 
 import pytest
 from opentelemetry._logs import LogRecord
@@ -20,7 +22,7 @@ from opentelemetry.sdk._logs.export import (
     SimpleLogRecordProcessor,
 )
 
-from i_dot_ai_utilities.otel import I_AI_NAMESPACE, iai_attribute, validate_attributes
+from i_dot_ai_utilities.otel import I_AI_NAMESPACE, _ecs, flush_otel, iai_attribute, validate_attributes
 from i_dot_ai_utilities.otel._attributes import (
     ENV_STRICT_ATTRIBUTES,
     AttributeNamespaceProcessor,
@@ -28,6 +30,7 @@ from i_dot_ai_utilities.otel._attributes import (
     is_valid_attribute_name,
 )
 from i_dot_ai_utilities.otel._ecs import (
+    ENV_SHUTDOWN_TIMEOUT_MS,
     batch_resource_attributes,
     install_sigterm_handler,
     register_capped_shutdown,
@@ -172,6 +175,26 @@ class TestContainerHelpers:
         register_capped_shutdown(provider, 0.1)
         assert provider._at_exit_handler is None
         provider.shutdown()
+
+    def test_flush_otel_waits_at_most_the_shutdown_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        release = threading.Event()
+
+        class _HungProvider:
+            def force_flush(self, _timeout_millis: int) -> bool:
+                return release.wait(10)
+
+        monkeypatch.setenv(ENV_SHUTDOWN_TIMEOUT_MS, "100")
+        monkeypatch.setattr(_ecs, "get_logger_provider", _HungProvider)
+        start = time.monotonic()
+        try:
+            assert flush_otel() is False
+            assert time.monotonic() - start < 2.0
+        finally:
+            release.set()
+
+        # Before configure_otel() the global provider has no force_flush.
+        monkeypatch.setattr(_ecs, "get_logger_provider", object)
+        assert flush_otel() is False
 
     def test_failure_reporting_exporter(self) -> None:
         reasons: list[str] = []
