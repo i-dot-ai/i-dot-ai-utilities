@@ -2,7 +2,7 @@
 
 `i_dot_ai_utilities.otel` sends Python application logs to the i.AI `otel-gateway` using the standard OpenTelemetry SDK. Call `configure_otel()` once at start-up. It detects the runtime, configures the SDK, attaches an OpenTelemetry handler to Python's root logger, and auto-instruments every installed instrumentation package. Application code then uses plain `logging`.
 
-It is separate from `StructuredLogger` and the legacy `i_dot_ai_utilities.logging.otel` bridge, and imports neither.
+It is separate from `StructuredLogger` and the legacy `i_dot_ai_utilities.logging.otel` bridge, and imports neither. Some other modules in this package still take a `StructuredLogger`; see [Modules that still use `StructuredLogger`](#modules-that-still-use-structuredlogger).
 
 ## Install
 
@@ -28,7 +28,7 @@ The extras pin the OpenTelemetry SDK to one minor version (currently 1.45), beca
 |---|---|---|
 | `lambda` | `AWS_LAMBDA_FUNCTION_NAME` | Synchronously at the end of each invocation, bounded by the export timeout, with an outage circuit breaker |
 | `ecs` | `ECS_CONTAINER_METADATA_URI_V4` or `AWS_BATCH_JOB_ID` | On the SDK's background thread; requests never wait on the network |
-| `local` | Neither of the above | Background thread to OTLP if an endpoint is set, otherwise to the console |
+| `local` | Neither of the above | Background thread to OTLP if an endpoint is set, otherwise stdout only |
 
 The `ecs` runtime covers ECS on Fargate, ECS on EC2 (including GPU instances) and AWS Batch jobs. All three expose the ECS task metadata endpoint, which `AwsEcsResourceDetector` reads for `aws.ecs.*` resource attributes. Batch jobs also get `i_ai.aws.batch.job.id`, `i_ai.aws.batch.job.attempt` and `i_ai.aws.batch.job.queue`.
 
@@ -46,11 +46,12 @@ from contextlib import asynccontextmanager
 
 from i_dot_ai_utilities.otel import configure_otel, flush_otel, iai_attribute
 
-configure_otel(service_name="casework-api")
+configure_otel()
 
 from fastapi import FastAPI  # noqa: E402
 
 logger = logging.getLogger(__name__)
+CASE_ID = iai_attribute("casework.case.id")
 
 
 @asynccontextmanager
@@ -64,7 +65,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/cases/{case_id}")
 def read_case(case_id: int) -> dict[str, int]:
-    logger.info("Case requested", extra={iai_attribute("casework.case.id"): case_id})
+    logger.info("Case requested", extra={CASE_ID: case_id})
     return {"case_id": case_id}
 ```
 
@@ -117,7 +118,7 @@ import logging
 
 from i_dot_ai_utilities.otel import configure_otel
 
-configure_otel(service_name="document-ingest")
+configure_otel()
 logger = logging.getLogger(__name__)
 
 
@@ -148,19 +149,22 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from i_dot_ai_utilities.otel import configure_otel, iai_attribute
 
 logger = logging.getLogger(__name__)
+APPLICATION = iai_attribute("auth.application")
 
 
 def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, int]:
     logger.info(
         "Authorisation request started",
-        extra={iai_attribute("auth.application"): event.get("application", "unknown")},
+        extra={APPLICATION: event.get("application", "unknown")},
     )
     return {"statusCode": 200}
 
 
 # Call after defining lambda_handler so the instrumentor wraps _HANDLER.
-configure_otel(service_name="core-auth-api")
+configure_otel()
 ```
+
+If `configure_otel()` runs before the handler is defined, it cannot wrap the handler, so nothing flushes at the end of each invocation. It writes `call configure_otel() after defining the handler` to stderr and keeps the runtime's stdout logging, whatever `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS` says.
 
 ## Naming attributes
 
@@ -185,27 +189,44 @@ validate_attributes({"user.email": email, iai_attribute("auth.token.key_id"): ke
 validate_attributes({"application": "casework"})  # raises ValueError listing "application"
 ```
 
+Build each name once, as a module-level constant, as the examples above do. A bad name then fails when the module is imported, which a test run catches. Called inline, as in `extra={iai_attribute("..."): value}`, a bad name raises from the logging call instead: the log line is lost and the exception lands in the request.
+
 `iai_attribute()` requires at least `<service>.<property>`. `validate_attributes()` accepts any name in the semantic convention registry that ships with the installed SDK, including template names such as `http.request.header.<key>` with any key (`http.request.header.content-type`), plus any well-formed `i_ai.` name.
 
 ### Enforcement
 
-Every exported log record is checked, whether or not the helpers were used. A non-compliant key is renamed to `i_ai.unnamespaced.<key>` before export, and a warning naming the key is written to stderr once per process. No data is lost, and offending keys are easy to find in the backend.
+Every log record is checked, whether or not the helpers were used. A non-compliant key is renamed to `i_ai.unnamespaced.<key>` before export, and a warning naming the key is written to stderr once per process. No data is lost, and offending keys are easy to find in the backend. The stdout copy of a log keeps the original key.
 
-Set `I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true` in tests or CI to raise `ValueError` from the logging call instead.
+Set `I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true` in tests or CI to raise `ValueError` from the logging call instead. It works with export off (`OTEL_LOGS_EXPORTER=none`), which is how most test suites run.
+
+On Lambda, the runtime adds `aws_request_id` to every record. It is exported as the semantic convention `faas.invocation_id`.
 
 Standard attributes the SDK adds itself, such as `code.file.path`, `code.function.name`, `code.line.number` and `exception.*`, are semantic conventions and pass unchanged.
 
 Never log bearer tokens, `Authorization` headers, JWT segments or raw request bodies. The library does not copy the Lambda event or HTTP request onto log records.
 
+### Names the gateway masks
+
+The gateway replaces the value of any attribute whose key matches one of its redaction patterns, so avoid these words in names that hold non-secret data:
+
+- keys containing `password`, `passwd`, `secret`, `authorization`, `cookie`, `api_key` or `access_key`. For example, the value of `i_ai.storage.access_key_id` arrives masked.
+- keys ending in `token`, such as `i_ai.auth.session_token`. Keys such as `gen_ai.usage.input_tokens` are not affected.
+
+It also masks values that look like an AWS access key ID, a JWT, a bearer token or an `sk-` API key, whatever the key is called. The patterns are in `collector/config.yaml.tftpl` in the `core-logging` repository.
+
 ## Service name
 
 `service.name` is resolved in this order:
 
-1. `service_name="..."` passed to `configure_otel()`.
-2. `OTEL_SERVICE_NAME` (set automatically when `otel_gateway.enabled = true` on the shared Terraform modules).
-3. Neither: `configure_otel()` warns once on stderr and the SDK uses `unknown_service`.
+1. `OTEL_SERVICE_NAME`, or `service.name` in `OTEL_RESOURCE_ATTRIBUTES`. The shared Terraform modules set `OTEL_SERVICE_NAME` when `otel_gateway.enabled = true`.
+2. `service_name="..."` passed to `configure_otel()`. Use it only where nothing sets the environment variable, such as a local run.
+3. Neither: if an OTLP endpoint is set, `configure_otel()` warns once on stderr, defaults `OTEL_LOGS_EXPORTER` to `none` and writes logs to stdout only.
 
-The gateway's `filter/service_allowlist` processor silently drops logs whose `service.name` is not on `allowed_service_names`, while still returning HTTP `200`. Keep `service_name` aligned with `otel_gateway.service_name`, or omit it and let `OTEL_SERVICE_NAME` win.
+The environment wins because the gateway's `filter/service_allowlist` processor silently drops logs whose `service.name` is not on `allowed_service_names`, while still returning HTTP `200`. The name Terraform sets is the one on the allow-list. For the same reason nothing is exported without a name: the SDK would send `unknown_service`, which the gateway drops.
+
+## Deployment environment
+
+`deployment.environment.name` defaults to the `ENVIRONMENT` environment variable, which i.AI services already set. Loki indexes it as a label. Set `deployment.environment.name` in `OTEL_RESOURCE_ATTRIBUTES` to override it.
 
 ## Environment variables
 
@@ -215,20 +236,25 @@ The gateway's `filter/service_allowlist` processor silently drops logs whose `se
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OTEL_SERVICE_NAME` | _(from Terraform or caller)_ | Service name when `service_name` is not passed |
+| `OTEL_SERVICE_NAME` | _(from Terraform)_ | Service name; wins over the `service_name` argument |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(from Terraform SSM)_ | Base OTLP/HTTP URL, for example `https://otel-gateway.dev.i.ai.gov.uk:4318`; the SDK appends `/v1/logs` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | _(unset)_ | Logs-specific override, used verbatim |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport. `http/protobuf` is the only supported value |
 | `OTEL_EXPORTER_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers |
-| `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_ | Extra resource attributes, for example `deployment.environment.name=dev` |
-| `OTEL_LOGS_EXPORTER` | `otlp` when an endpoint is set; otherwise `none` (`console` locally) | Logs exporter |
+| `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_ | Extra resource attributes, for example `service.namespace=casework` |
+| `ENVIRONMENT` | _(set by the service)_ | Default for `deployment.environment.name` |
+| `OTEL_LOGS_EXPORTER` | `otlp` when an endpoint and a service name are set; otherwise `none` | Logs exporter |
 | `OTEL_TRACES_EXPORTER` | `none` | Off because `otel-gateway` only has a logs pipeline |
 | `OTEL_METRICS_EXPORTER` | `none` | Off because `otel-gateway` only has a logs pipeline |
 | `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` | _(unset)_ | Comma-separated instrumentations to skip, for example `fastapi`, or `*` for all |
-| `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS` | `true` on `ecs`, `false` elsewhere | Also write application logs to stdout |
+| `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS` | `true` | Also write application logs to stdout |
 | `I_DOT_AI_OTEL_STRICT_ATTRIBUTES` | `false` | Raise on non-compliant attribute names instead of renaming them |
 
 `I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS` is the earlier name for `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS` and is still accepted. The new name wins if both are set.
+
+### Protocol
+
+OTLP over HTTP (`http/protobuf`) is the only supported protocol. The extras install only the HTTP exporter, and every outage, shutdown and SIGTERM test runs over HTTP. The SDK rejects `http/json`, and rejects `grpc` because the gRPC exporter is not installed. When it does, `configure_otel()` warns once on stderr, turns export off and writes logs to stdout only, so a wrong setting cannot stop the application starting.
 
 On `lambda` and `ecs`, `OTEL_PYTHON_ID_GENERATOR` defaults to `xray` and `OTEL_PROPAGATORS` to `xray,tracecontext,baggage`, so trace IDs are X-Ray compatible.
 
@@ -254,11 +280,19 @@ On `lambda` and `ecs`, `OTEL_PYTHON_ID_GENERATOR` defaults to `xray` and `OTEL_P
 
 ## Stdout logging
 
-On `ecs`, application logs go to stdout as well as OTLP by default, as one JSON object per line, so CloudWatch keeps a copy during a gateway outage. Each line has `timestamp`, `level`, `logger`, `message`, `trace_id` and `span_id` inside a span, every `extra=` attribute, and `exception` when there is one. A single line per record means `awslogs` never splits a multi-line traceback into separate events.
+Application logs go to stdout as well as OTLP by default on every runtime, so CloudWatch keeps a copy during a gateway outage. A successful response from the gateway means it queued the batch, not that it stored it, so the gateway's own guidance is to keep a copy. The cost is CloudWatch ingestion for every log line.
+
+On `ecs` and `local`, each log is one JSON object per line. Each line has `timestamp`, `level`, `logger`, `message`, `trace_id` and `span_id` inside a span, every `extra=` attribute, and `exception` when there is one. A single line per record means `awslogs` never splits a multi-line traceback into separate events.
 
 The stdout handler is only added when the root logger has no other handlers. If the application already configures console logging, that is left as is. Set `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS=false` to send logs to OTLP only. When no OTLP endpoint is configured, or `OTEL_LOGS_EXPORTER=none`, stdout stays on regardless, so turning export off never turns logging off.
 
-On Lambda, `configure_otel()` removes the runtime's own `awslambdaric` stdout handlers so logs are not duplicated, unless `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS=true` or export is off.
+On Lambda, the runtime's own `awslambdaric` stdout handlers already write to CloudWatch, so `configure_otel()` leaves them in place and adds none. With `I_DOT_AI_OTEL_KEEP_STDOUT_LOGS=false` it removes them, but only once the handler is wrapped and only while export is on.
+
+## Modules that still use `StructuredLogger`
+
+`auth`, `metrics`, `file_store` and `litellm` take a `StructuredLogger` in their constructors. `StructuredLogger` prints straight to stdout, so their logs reach CloudWatch but not the gateway. Moving them to plain `logging` is separate work.
+
+Passing a `logging.Logger` instead works only for `metrics`, which calls nothing but `.exception()`. The others pass keyword arguments, as in `logger.info("... {key}", key=key)`, which `logging` rejects with `TypeError`. `auth` only does so in `debug` calls, so it works until the logger's level is `DEBUG`.
 
 ## Log levels
 

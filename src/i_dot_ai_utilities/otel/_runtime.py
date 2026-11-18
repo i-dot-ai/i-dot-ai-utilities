@@ -22,7 +22,7 @@ from opentelemetry.environment_variables import (
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_PROTOCOL
 
-from i_dot_ai_utilities.otel._environment import keep_stdout_logs
+from i_dot_ai_utilities.otel._environment import keep_stdout_logs, logs_export_disabled
 from i_dot_ai_utilities.otel._stdout import install_stdout_handler
 
 if TYPE_CHECKING:
@@ -67,8 +67,8 @@ class Runtime:
     def __init__(self, *, service_name: str | None) -> None:
         self.service_name = service_name
 
-    def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        apply_common_env_defaults(logs_exporter="otlp" if endpoint_configured else "none")
+    def apply_env_defaults(self, *, can_export: bool) -> None:
+        apply_common_env_defaults(logs_exporter="otlp" if can_export else "none")
 
     def resource_attributes(self) -> dict[str, AttributeValue]:
         return {}
@@ -77,7 +77,8 @@ class Runtime:
         return BatchLogRecordProcessor(exporter)
 
     def post_configure(self, _provider: LoggerProvider) -> None:
-        if keep_stdout_logs(default=False):
+        # Export off must never mean logging off, so stdout is forced on in that case.
+        if logs_export_disabled() or keep_stdout_logs():
             install_stdout_handler()
 
     def on_reconfigure(self) -> None:
@@ -88,11 +89,8 @@ class LocalRuntime(Runtime):
     """Developer machines and anything not detected as AWS."""
 
     missing_endpoint_message = (
-        "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set; using console log exporter."
+        "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set; logs go to stdout only."
     )
-
-    def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        apply_common_env_defaults(logs_exporter="otlp" if endpoint_configured else "console")
 
 
 __all__ = [

@@ -4,9 +4,9 @@ Every runtime runs the same sequence; :class:`~i_dot_ai_utilities.otel._runtime.
 subclasses customise individual steps:
 
 1. Apply environment defaults (``setdefault``, so explicit variables win).
-2. Build resource attributes (runtime detector, then explicit ``service_name``).
-3. Configure the SDK through ``OpenTelemetryConfigurator``, wrapping the log
-   exporter in the runtime's processor and the ``i_ai`` attribute namespace check.
+2. Build resource attributes (runtime detector, service name, environment).
+3. Configure the SDK through ``OpenTelemetryConfigurator``, with the ``i_ai``
+   attribute namespace check ahead of the runtime's export processor.
 4. Attach the OpenTelemetry logging handler to the root logger.
 5. Auto-instrument every installed instrumentation package.
 6. Run the runtime's post-configure hook (flush wrapper, shutdown cap, stdout).
@@ -24,9 +24,10 @@ from typing import TYPE_CHECKING, cast
 from opentelemetry import propagate
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.distro import OpenTelemetryConfigurator
+from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.sdk._configuration import _overwrite_logging_config_fns
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk.environment_variables import OTEL_SERVICE_NAME
+from opentelemetry.sdk.resources import OTELResourceDetector
 
 from i_dot_ai_utilities.otel._attributes import AttributeNamespaceProcessor
 from i_dot_ai_utilities.otel._ecs import EcsRuntime, is_container_runtime
@@ -36,8 +37,6 @@ from i_dot_ai_utilities.otel._lambda import LambdaRuntime
 from i_dot_ai_utilities.otel._runtime import LocalRuntime, Runtime, RuntimeName
 
 if TYPE_CHECKING:
-    from opentelemetry.sdk._logs import LogRecordProcessor
-    from opentelemetry.sdk._logs.export import LogRecordExporter
     from opentelemetry.util.types import AttributeValue
 
 _RUNTIMES: dict[RuntimeName, type[Runtime]] = {
@@ -48,6 +47,7 @@ _RUNTIMES: dict[RuntimeName, type[Runtime]] = {
 
 _INTERNAL_OTEL_LOGGER_PREFIX = "opentelemetry"
 _NOISY_LIBRARY_LOGGERS = ("botocore", "boto3", "urllib3")
+_ENVIRONMENT_ATTRIBUTE = "deployment.environment.name"
 
 
 @dataclass
@@ -96,16 +96,20 @@ def _warn_once(key: str, message: str) -> None:
     sys.stderr.write(f"i_dot_ai_utilities.otel: {message}\n")
 
 
+def _env_resource_attributes() -> dict[str, AttributeValue]:
+    """Return the attributes set by ``OTEL_SERVICE_NAME`` and ``OTEL_RESOURCE_ATTRIBUTES``."""
+    return dict(OTELResourceDetector().detect().attributes)
+
+
 def _resolve_service_name(service_name: str | None) -> str | None:
-    """Return explicit ``service_name``, else ``OTEL_SERVICE_NAME``, else warn once."""
-    resolved = (service_name or "").strip() or os.environ.get(OTEL_SERVICE_NAME, "").strip()
-    if not resolved:
-        _warn_once(
-            "service_name",
-            "service_name is not set (neither passed to configure_otel() nor set in OTEL_SERVICE_NAME); "
-            "the gateway drops logs whose service.name is not on the allow-list.",
-        )
-    return resolved or None
+    """Return the environment's service name, else ``service_name``, else None.
+
+    The environment wins because the shared Terraform modules set
+    ``OTEL_SERVICE_NAME`` to the name on the gateway's allow-list, and the
+    gateway silently drops any other name.
+    """
+    from_env = str(_env_resource_attributes().get("service.name", "")).strip()
+    return from_env or (service_name or "").strip() or None
 
 
 def _build_sdk_logging_handler(provider: LoggerProvider) -> LoggingHandler:
@@ -145,11 +149,42 @@ def _install_root_handler(provider: LoggerProvider) -> LoggingHandler:
 
 def _resource_attributes(runtime: Runtime) -> dict[str, AttributeValue]:
     attributes = runtime.resource_attributes()
-    # ``Resource.create(attributes)`` merges these on top of ``OTEL_RESOURCE_ATTRIBUTES``
-    # and ``OTEL_SERVICE_NAME``, so an explicit ``service_name`` takes highest precedence.
+    # ``Resource.create(attributes)`` merges these on top of ``OTEL_RESOURCE_ATTRIBUTES`` and
+    # ``OTEL_SERVICE_NAME``. The resolved name already prefers the environment's own.
     if runtime.service_name:
         attributes["service.name"] = runtime.service_name
+    # Loki indexes this label. i.AI services already set ``ENVIRONMENT``, so it is the default.
+    environment = os.environ.get("ENVIRONMENT", "").strip()
+    if environment and _ENVIRONMENT_ATTRIBUTE not in _env_resource_attributes():
+        attributes[_ENVIRONMENT_ATTRIBUTE] = environment
     return attributes
+
+
+def _configure_sdk(runtime: Runtime) -> None:
+    """Configure the SDK providers, falling back to no export if the SDK rejects the exporter settings."""
+
+    def _configure() -> None:
+        OpenTelemetryConfigurator().configure(
+            resource_attributes=_resource_attributes(runtime),
+            setup_logging_handler=False,
+            # Runs before the export processors, and still runs when there are none.
+            log_record_processors=[AttributeNamespaceProcessor()],
+            export_log_record_processor=runtime.log_record_processor,
+        )
+
+    try:
+        _configure()
+    except RuntimeError as exc:
+        # Raised for an unsupported protocol or a missing exporter package (``http/json`` and
+        # ``grpc`` both do), before the SDK sets any provider, so configuring again is safe.
+        _warn_once(
+            "sdk_configuration",
+            f"the OpenTelemetry SDK rejected the exporter settings ({exc}); continuing with export "
+            "disabled and logs on stdout only. http/protobuf is the only supported OTLP protocol.",
+        )
+        for name in (OTEL_LOGS_EXPORTER, OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER):
+            os.environ[name] = "none"
+        _configure()
 
 
 def configure_otel(
@@ -163,6 +198,10 @@ def configure_otel(
     as ``FastAPI()`` so instrumentation can patch them. On Lambda, call it at
     the bottom of the handler module so the handler can be wrapped.
 
+    ``service_name`` is a fallback: ``OTEL_SERVICE_NAME`` (or ``service.name``
+    in ``OTEL_RESOURCE_ATTRIBUTES``) wins when set. With an endpoint but no
+    service name, OTLP export is turned off and logs go to stdout only.
+
     Idempotent within a process: later calls return the same provider (on
     Lambda they also wrap the handler if an earlier call ran before it existed).
     """
@@ -175,20 +214,19 @@ def configure_otel(
     endpoint_configured = has_otlp_logs_endpoint()
     if not endpoint_configured:
         _warn_once("endpoint", active.missing_endpoint_message)
-    active.apply_env_defaults(endpoint_configured=endpoint_configured)
+    elif active.service_name is None:
+        _warn_once(
+            "service_name",
+            "service_name is not set (neither OTEL_SERVICE_NAME nor passed to configure_otel()); the gateway "
+            "drops logs with no allow-listed service.name, so OTLP log export defaults to off and logs stay on stdout.",
+        )
+    active.apply_env_defaults(can_export=endpoint_configured and active.service_name is not None)
 
     # Reload propagators from ``OTEL_PROPAGATORS`` so the AWS X-Ray + W3C default takes
     # effect even if ``opentelemetry.propagate`` was imported before configure_otel() ran.
     propagate.set_global_textmap(propagate._load_propagators())  # noqa: SLF001
 
-    def _log_record_processor(exporter: LogRecordExporter) -> LogRecordProcessor:
-        return AttributeNamespaceProcessor(active.log_record_processor(exporter))
-
-    OpenTelemetryConfigurator().configure(
-        resource_attributes=_resource_attributes(active),
-        setup_logging_handler=False,
-        export_log_record_processor=_log_record_processor,
-    )
+    _configure_sdk(active)
 
     provider = cast("LoggerProvider", get_logger_provider())
     _state.root_logging_handler = _install_root_handler(provider)

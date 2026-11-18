@@ -64,6 +64,7 @@ class TestEcsFastApiEndToEnd:
                     "ECS_CONTAINER_METADATA_URI_V4": metadata.uri,
                     "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
                     "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment.name=dev",
+                    "ENVIRONMENT": "ignored-because-the-attribute-is-set",
                     "TEST_EXPLICIT_SERVICE_NAME": "sample-api",
                 }
             )
@@ -100,10 +101,12 @@ class TestEcsFastApiEndToEnd:
                     "AWS_BATCH_JQ_NAME": "gpu-queue",
                     "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
                     "OTEL_SERVICE_NAME": "sample-batch",
+                    "ENVIRONMENT": "preprod",
                     "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
                 }
             )
             resource = server.log_records[0].resource_attributes
+            assert resource["deployment.environment.name"] == "preprod"
             assert resource["i_ai.aws.batch.job.id"] == "job-123"
             assert resource["i_ai.aws.batch.job.attempt"] == "2"
             assert resource["i_ai.aws.batch.job.queue"] == "gpu-queue"
@@ -163,6 +166,23 @@ class TestEcsFastApiEndToEnd:
         assert summary["statuses"] == [200, 200, 200]
         assert len([rec for rec in _stdout_json(proc) if rec.get("message") == "Item requested"]) == 3
         assert proc.stderr.count("continuing with OTLP log export disabled") == 1
+
+    def test_unsupported_protocol_falls_back_to_stdout_instead_of_crashing(self) -> None:
+        # The SDK raises for ``http/json``, and for ``grpc`` without the gRPC exporter package installed.
+        with OtlpCaptureServer() as server:
+            proc, summary, _ = _run(
+                {
+                    "AWS_BATCH_JOB_ID": "job-bad-protocol",
+                    "OTEL_SERVICE_NAME": "sample-api",
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
+                    "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
+                }
+            )
+            assert summary["statuses"] == [200, 200, 200]
+            assert len([rec for rec in _stdout_json(proc) if rec.get("message") == "Item requested"]) == 3
+            assert proc.stderr.count("rejected the exporter settings") == 1
+            assert server.requests == []
 
 
 class TestSigterm:

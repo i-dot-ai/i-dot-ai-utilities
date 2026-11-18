@@ -41,6 +41,7 @@ from i_dot_ai_utilities.otel._export import (
 from i_dot_ai_utilities.otel._lambda import (
     DEFAULT_FLUSH_MARGIN_MS,
     ENV_FLUSH_MARGIN_MS,
+    LambdaRuntime,
     emit_lambda_export_failure,
     flush_lambda_logs,
     is_lambda_runtime_stdout_handler,
@@ -271,7 +272,6 @@ class TestLambdaHelpers:
 
     def test_remove_only_lambda_runtime_stdout_handlers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
-        monkeypatch.delenv(ENV_KEEP_STDOUT_LOGS, raising=False)
 
         class LambdaLoggerHandler(logging.StreamHandler):  # type: ignore[type-arg]
             pass
@@ -280,11 +280,15 @@ class TestLambdaHelpers:
         runtime_handler = LambdaLoggerHandler(io.StringIO())
         custom_handler = logging.StreamHandler(io.StringIO())
 
+        test_logger = logging.getLogger("test.runtime.handlers")
+        test_logger.handlers = [runtime_handler, custom_handler]
+        monkeypatch.delenv(ENV_KEEP_STDOUT_LOGS, raising=False)
+        assert remove_lambda_runtime_stdout_handlers(test_logger) == 0  # stdout is kept by default
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "false")
+
         assert is_lambda_runtime_stdout_handler(runtime_handler) is True
         assert is_lambda_runtime_stdout_handler(custom_handler) is False
 
-        test_logger = logging.getLogger("test.runtime.handlers")
-        test_logger.handlers = [runtime_handler, custom_handler]
         removed = remove_lambda_runtime_stdout_handlers(test_logger)
         assert removed == 1
         assert test_logger.handlers == [custom_handler]
@@ -305,6 +309,30 @@ class TestLambdaHelpers:
         test_logger.handlers = [runtime_handler]
         assert remove_lambda_runtime_stdout_handlers(test_logger) == 0
         assert test_logger.handlers == [runtime_handler]
+
+    def test_stdout_handlers_kept_when_the_handler_cannot_be_wrapped(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Without the wrapper nothing flushes per invocation, so stdout must stay even when opted out.
+        class LambdaLoggerHandler(logging.StreamHandler):  # type: ignore[type-arg]
+            pass
+
+        LambdaLoggerHandler.__module__ = "awslambdaric.bootstrap"
+        monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "false")
+        monkeypatch.setenv("_HANDLER", "i_dot_ai_utilities.otel.__tests__.test_unit.handler_not_defined_yet")
+        monkeypatch.delenv("ORIG_HANDLER", raising=False)
+        runtime_handler = LambdaLoggerHandler(io.StringIO())
+        root_logger = logging.getLogger()
+        root_logger.addHandler(runtime_handler)
+        try:
+            LambdaRuntime(service_name="svc").on_reconfigure()
+            assert runtime_handler in root_logger.handlers
+            assert "call configure_otel() after defining the handler" in capsys.readouterr().err
+        finally:
+            root_logger.removeHandler(runtime_handler)
 
     def test_flush_lambda_logs_skips_when_remaining_time_below_budget(
         self,

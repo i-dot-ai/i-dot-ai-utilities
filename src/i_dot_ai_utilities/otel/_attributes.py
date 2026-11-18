@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 I_AI_NAMESPACE: Final[str] = "i_ai"
 UNNAMESPACED_PREFIX: Final[str] = f"{I_AI_NAMESPACE}.unnamespaced."
 ENV_STRICT_ATTRIBUTES: Final[str] = "I_DOT_AI_OTEL_STRICT_ATTRIBUTES"
+# The Lambda runtime's stdout handler stamps this on every record; the application did not choose the name.
+_LAMBDA_REQUEST_ID_KEY: Final[str] = "aws_request_id"
+_INVOCATION_ID_ATTRIBUTE: Final[str] = "faas.invocation_id"
 
 _SEGMENT: Final[str] = r"[a-z][a-z0-9_]*"
 # ``i_ai.<service>.<property>`` at minimum; deeper ``<object>.<property>`` levels are allowed.
@@ -102,19 +105,24 @@ def validate_attributes(attributes: Mapping[str, Any]) -> dict[str, Any]:
 class AttributeNamespaceProcessor(LogRecordProcessor):
     """Move non-compliant log attribute keys under ``i_ai.unnamespaced.`` before export.
 
-    Runs ahead of ``delegate`` so the exporter only ever sees compliant keys.
+    Registered ahead of the export processors, so exporters only ever see
+    compliant keys, and it still runs when export is off (``OTEL_LOGS_EXPORTER=none``).
     Keys are renamed rather than dropped so no data is lost, and each offending
     key is reported once on stderr. Set ``I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true``
     to raise ``ValueError`` from the logging call instead, for tests and CI.
     """
 
-    def __init__(self, delegate: LogRecordProcessor) -> None:
-        self._delegate = delegate
+    def __init__(self) -> None:
         self._strict = env_flag(ENV_STRICT_ATTRIBUTES, default=False)
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
         attributes = log_record.log_record.attributes
         if attributes:
+            if _LAMBDA_REQUEST_ID_KEY in attributes:
+                request_id = attributes[_LAMBDA_REQUEST_ID_KEY]
+                del attributes[_LAMBDA_REQUEST_ID_KEY]  # type: ignore[attr-defined]
+                if request_id:  # empty outside an invocation
+                    attributes[_INVOCATION_ID_ATTRIBUTE] = request_id  # type: ignore[index]
             invalid = [key for key in attributes if not is_valid_attribute_name(key)]
             if invalid:
                 if self._strict:
@@ -125,13 +133,12 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
                     del attributes[key]  # type: ignore[attr-defined]
                     attributes[f"{UNNAMESPACED_PREFIX}{key}"] = value  # type: ignore[index]
                     _warn_once(key)
-        self._delegate.on_emit(log_record)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return bool(self._delegate.force_flush(timeout_millis))
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002
+        return True
 
     def shutdown(self) -> None:
-        self._delegate.shutdown()
+        pass
 
 
 def _warn_once(key: str) -> None:

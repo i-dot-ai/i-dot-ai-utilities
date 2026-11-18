@@ -33,12 +33,12 @@ def env_flag(name: str, *, default: bool) -> bool:
     return raw in _TRUTHY if raw else default
 
 
-def keep_stdout_logs(*, default: bool) -> bool:
-    """Return whether application logs should also go to stdout alongside OTLP."""
+def keep_stdout_logs() -> bool:
+    """Return whether application logs also go to stdout alongside OTLP. On unless set to false."""
     for name in (ENV_KEEP_STDOUT_LOGS, ENV_KEEP_STDOUT_LOGS_LAMBDA):
         if os.environ.get(name, "").strip():
-            return env_flag(name, default=default)
-    return default
+            return env_flag(name, default=True)
+    return True
 
 
 def env_number(name: str, default: float) -> float:

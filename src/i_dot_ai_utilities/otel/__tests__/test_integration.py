@@ -63,7 +63,7 @@ def _run_scenario(
 
 
 class TestLambdaEndToEnd:
-    def test_logs_only_default_sends_no_traces_or_metrics_and_suppresses_stdout(self) -> None:
+    def test_logs_only_default_sends_no_traces_or_metrics_and_stdout_opt_out_suppresses_stdout(self) -> None:
         with OtlpCaptureServer() as server:
             proc, summary = _run_scenario(
                 [
@@ -82,6 +82,7 @@ class TestLambdaEndToEnd:
                     "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
                     "OTEL_EXPORTER_OTLP_HEADERS": "x-custom-test=iai-test",
                     "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment.name=dev",
+                    "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
                     "TEST_EXPLICIT_SERVICE_NAME": "core-auth-api",
                     "TEST_CALL_CONFIGURE_TWICE": "1",
                     "TEST_INSTALL_USER_HANDLER": "1",
@@ -288,16 +289,17 @@ class TestLambdaEndToEnd:
         reasons = [json.loads(line)["reason"] for line in proc.stdout.splitlines() if line.strip()]
         assert reasons == ["flush_timeout", "flush_in_progress"]
 
-    def test_keep_stdout_logs_writes_to_runtime_handler_and_otlp(self) -> None:
+    def test_default_writes_to_runtime_handler_and_otlp(self) -> None:
         with OtlpCaptureServer() as server:
             _, summary = _run_scenario(
                 [{"request_id": "req-both", "remaining_ms": 4500, "event": {"mode": "ok", "application": "dual"}}],
                 env_overrides={
                     "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
                     "OTEL_SERVICE_NAME": "core-auth-api",
-                    "I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS": "true",
+                    "ENVIRONMENT": "preprod",
                 },
             )
+            assert server.log_records[0].resource_attributes["deployment.environment.name"] == "preprod"
             assert "Authorisation request started for dual" in summary["runtime_handler_output"]
             assert [rec.body for rec in server.log_records] == ["Authorisation request started for dual"]
 
@@ -324,7 +326,8 @@ class TestLambdaEndToEnd:
         )
         assert "Authorisation request started for off" in summary["runtime_handler_output"]
 
-    def test_service_name_precedence_and_missing_warning(self) -> None:
+    def test_environment_service_name_wins_and_missing_name_turns_export_off(self) -> None:
+        # The shared Terraform modules set OTEL_SERVICE_NAME to the allow-listed name, so it beats the argument.
         with OtlpCaptureServer() as server:
             _, _ = _run_scenario(
                 [{"request_id": "req-prec", "remaining_ms": 4500, "event": {"mode": "ok"}}],
@@ -334,26 +337,30 @@ class TestLambdaEndToEnd:
                     "TEST_EXPLICIT_SERVICE_NAME": "explicit-service-name",
                 },
             )
-            assert server.log_records[0].resource_attributes["service.name"] == "explicit-service-name"
-
-        with OtlpCaptureServer() as server:
-            _, _ = _run_scenario(
-                [{"request_id": "req-env", "remaining_ms": 4500, "event": {"mode": "ok"}}],
-                env_overrides={
-                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
-                    "OTEL_SERVICE_NAME": "env-service-name",
-                },
-            )
             assert server.log_records[0].resource_attributes["service.name"] == "env-service-name"
 
         with OtlpCaptureServer() as server:
-            proc, _ = _run_scenario(
+            _, _ = _run_scenario(
+                [{"request_id": "req-arg", "remaining_ms": 4500, "event": {"mode": "ok"}}],
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "TEST_EXPLICIT_SERVICE_NAME": "explicit-service-name",
+                },
+            )
+            assert server.log_records[0].resource_attributes["service.name"] == "explicit-service-name"
+
+        # The gateway drops ``unknown_service`` while answering 200, so nothing is sent and stdout keeps the logs.
+        with OtlpCaptureServer() as server:
+            proc, summary = _run_scenario(
                 [{"request_id": "req-missing", "remaining_ms": 4500, "event": {"mode": "ok"}}],
                 env_overrides={
                     "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
                     "TEST_CALL_CONFIGURE_TWICE": "1",
                 },
             )
+            assert server.requests == []
+            assert "Authorisation request started" in summary["runtime_handler_output"]
             assert proc.stderr.count("service_name is not set") == 1
 
     def test_missing_endpoint_on_lambda_warns_once_and_keeps_stdout_logs(self) -> None:
@@ -369,12 +376,12 @@ class TestLambdaEndToEnd:
         assert "Authorisation request started" in summary["runtime_handler_output"]
         assert proc.stderr.count("continuing with OTLP log export disabled") == 1
 
-    def test_missing_endpoint_locally_uses_console_log_exporter(self) -> None:
+    def test_missing_endpoint_locally_writes_one_json_line_per_log(self) -> None:
         script = (
             "import logging\n"
             "from i_dot_ai_utilities.otel import configure_otel\n"
             "provider = configure_otel(service_name='local-dev-svc')\n"
-            "logging.getLogger('local.app').info('hello-local-console')\n"
+            "logging.getLogger('local.app').info('hello-local-console', extra={'i_ai.sample.item.id': 7})\n"
             "provider.force_flush()\n"
         )
         env = {k: v for k, v in os.environ.items() if not k.startswith("OTEL_") and not k.startswith("AWS_LAMBDA_")}
@@ -386,8 +393,35 @@ class TestLambdaEndToEnd:
             check=False,
         )
         assert proc.returncode == 0, f"stderr={proc.stderr!r}"
-        assert "hello-local-console" in proc.stdout
-        assert "using console log exporter" in proc.stderr
+        (line,) = proc.stdout.splitlines()
+        record = json.loads(line)
+        assert record["message"] == "hello-local-console"
+        assert record["i_ai.sample.item.id"] == 7
+        assert "logs go to stdout only" in proc.stderr
+
+    def test_strict_attributes_raise_when_export_is_off(self) -> None:
+        # Application test suites turn export off, and strict mode is how they check attribute names.
+        script = (
+            "import logging\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "configure_otel()\n"
+            "try:\n"
+            "    logging.getLogger('app').info('bad', extra={'application': 'casework'})\n"
+            "except ValueError as exc:\n"
+            "    print('STRICT_RAISED', exc)\n"
+        )
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "I_DOT_AI_OTEL_", "AWS_LAMBDA_"))}
+        env.update({"OTEL_LOGS_EXPORTER": "none", "I_DOT_AI_OTEL_STRICT_ATTRIBUTES": "true"})
+        proc = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        assert proc.returncode == 0, f"stderr={proc.stderr!r}"
+        assert "STRICT_RAISED" in proc.stdout
+        assert "'application'" in proc.stdout
 
     def test_otlp_handler_survives_application_logging_config(self) -> None:
         # Alembic's env.py and many apps reconfigure logging after start-up, which replaces root handlers.

@@ -19,7 +19,6 @@ from opentelemetry.sdk._logs.export import (
     BatchLogRecordProcessor,
     InMemoryLogRecordExporter,
     LogRecordExportResult,
-    SimpleLogRecordProcessor,
 )
 
 from i_dot_ai_utilities.otel import I_AI_NAMESPACE, _ecs, flush_otel, iai_attribute, validate_attributes
@@ -110,27 +109,30 @@ class TestAttributeNames:
 
 class TestAttributeNamespaceProcessor:
     @staticmethod
-    def _emit(processor: AttributeNamespaceProcessor, attributes: dict[str, object]) -> ReadWriteLogRecord:
+    def _emit(processor: AttributeNamespaceProcessor, attributes: dict[str, object]) -> dict[str, object]:
         record = ReadWriteLogRecord(LogRecord(body="m", attributes=attributes))  # type: ignore[arg-type]
         processor.on_emit(record)
-        return record
+        return dict(record.log_record.attributes or {})
 
     def test_renames_bad_keys_and_warns_once(self, capsys: pytest.CaptureFixture[str]) -> None:
-        exporter = InMemoryLogRecordExporter()
-        processor = AttributeNamespaceProcessor(SimpleLogRecordProcessor(exporter))
-        self._emit(processor, {"mode": "ok", "i_ai.auth.application": "x", "code.line.number": 3})
-        self._emit(processor, {"mode": "again"})
+        processor = AttributeNamespaceProcessor()
+        first = self._emit(processor, {"mode": "ok", "i_ai.auth.application": "x", "code.line.number": 3})
+        second = self._emit(processor, {"mode": "again"})
 
-        exported = [dict(r.log_record.attributes or {}) for r in exporter.get_finished_logs()]
-        assert exported == [
-            {"i_ai.auth.application": "x", "code.line.number": 3, "i_ai.unnamespaced.mode": "ok"},
-            {"i_ai.unnamespaced.mode": "again"},
-        ]
+        assert first == {"i_ai.auth.application": "x", "code.line.number": 3, "i_ai.unnamespaced.mode": "ok"}
+        assert second == {"i_ai.unnamespaced.mode": "again"}
         assert capsys.readouterr().err.count("log attribute 'mode'") == 1
+
+    def test_lambda_runtime_request_id_becomes_invocation_id(self, capsys: pytest.CaptureFixture[str]) -> None:
+        # The Lambda runtime's stdout handler stamps ``aws_request_id`` on every record, empty outside an invocation.
+        processor = AttributeNamespaceProcessor()
+        assert self._emit(processor, {"aws_request_id": "req-1"}) == {"faas.invocation_id": "req-1"}
+        assert self._emit(processor, {"aws_request_id": ""}) == {}
+        assert capsys.readouterr().err == ""
 
     def test_strict_mode_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(ENV_STRICT_ATTRIBUTES, "true")
-        processor = AttributeNamespaceProcessor(SimpleLogRecordProcessor(InMemoryLogRecordExporter()))
+        processor = AttributeNamespaceProcessor()
         with pytest.raises(ValueError, match="application"):
             self._emit(processor, {"application": "x"})
 
@@ -144,15 +146,14 @@ class TestContainerHelpers:
         monkeypatch.setenv("AWS_BATCH_JQ_NAME", " ")
         assert batch_resource_attributes() == {"i_ai.aws.batch.job.id": "job-1"}
 
-    def test_keep_stdout_new_name_wins_and_old_name_still_works(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_keep_stdout_defaults_on_and_new_name_wins_over_old(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(ENV_KEEP_STDOUT_LOGS, raising=False)
         monkeypatch.delenv(ENV_KEEP_STDOUT_LOGS_LAMBDA, raising=False)
-        assert keep_stdout_logs(default=True) is True
-        assert keep_stdout_logs(default=False) is False
-        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS_LAMBDA, "true")
-        assert keep_stdout_logs(default=False) is True
-        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "false")
-        assert keep_stdout_logs(default=True) is False
+        assert keep_stdout_logs() is True
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS_LAMBDA, "false")
+        assert keep_stdout_logs() is False
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "true")
+        assert keep_stdout_logs() is True
 
     def test_sigterm_handler_installed_only_when_default(self) -> None:
         previous = signal.getsignal(signal.SIGTERM)

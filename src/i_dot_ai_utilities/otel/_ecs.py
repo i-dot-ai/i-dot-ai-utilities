@@ -26,10 +26,9 @@ from opentelemetry.sdk.extension.aws.resource import AwsEcsResourceDetector
 
 from i_dot_ai_utilities.otel._attributes import iai_attribute
 from i_dot_ai_utilities.otel._emf import RateLimitedFailureSignal
-from i_dot_ai_utilities.otel._environment import env_number, keep_stdout_logs, logs_export_disabled
+from i_dot_ai_utilities.otel._environment import env_number
 from i_dot_ai_utilities.otel._export import FailureReportingExporter
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
-from i_dot_ai_utilities.otel._stdout import install_stdout_handler
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -147,8 +146,8 @@ class EcsRuntime(Runtime):
             interval_seconds=FAILURE_SIGNAL_INTERVAL_SECONDS,
         )
 
-    def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        super().apply_env_defaults(endpoint_configured=endpoint_configured)
+    def apply_env_defaults(self, *, can_export: bool) -> None:
+        super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS)
@@ -165,9 +164,7 @@ class EcsRuntime(Runtime):
         timeout_ms = env_number(ENV_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS)
         register_capped_shutdown(provider, timeout_ms / 1000)
         install_sigterm_handler()
-        # Export off must never mean logging off, so stdout is forced on in that case.
-        if logs_export_disabled() or keep_stdout_logs(default=True):
-            install_stdout_handler()
+        super().post_configure(provider)
 
 
 __all__ = [

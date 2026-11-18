@@ -83,10 +83,10 @@ def remove_lambda_runtime_stdout_handlers(
 ) -> int:
     """Remove only ``awslambdaric``'s root handlers so application logs are not duplicated.
 
-    Keeps them when OTLP log export is disabled, so turning export off never
-    turns application logging off, or when the app opts in to stdout as a fallback.
+    Keeps them unless the app opted out of stdout logs, and always when OTLP log
+    export is disabled, so turning export off never turns application logging off.
     """
-    if logs_export_disabled() or keep_stdout_logs(default=False):
+    if logs_export_disabled() or keep_stdout_logs():
         return 0
     root = root_logger if root_logger is not None else logging.getLogger()
     removed = 0
@@ -229,9 +229,10 @@ def instrument_lambda_handler(
     processor: TrackedBatchLogRecordProcessor | None,
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
-) -> None:
+) -> bool:
     """Instrument the Lambda handler, then install the outer log flush wrapper around it.
 
+    Returns True when the handler is wrapped, False when it could not be found.
     Raises ``ImportError`` when ``opentelemetry-instrumentation-aws-lambda`` is
     missing, so a Lambda deployed without the ``[otel_native_lambda]`` extra fails fast.
     """
@@ -244,7 +245,7 @@ def instrument_lambda_handler(
         sys.stderr.write(
             "i_dot_ai_utilities.otel: ORIG_HANDLER/_HANDLER is not set; skipping Lambda handler wrapping.\n"
         )
-        return
+        return False
 
     module_name, function_name = target
     try:
@@ -253,14 +254,14 @@ def instrument_lambda_handler(
         sys.stderr.write(
             f"i_dot_ai_utilities.otel: failed to import handler module {module_name!r}; skipping handler wrapping.\n"
         )
-        return
+        return False
 
     if not hasattr(handler_module, function_name):
         sys.stderr.write(
             f"i_dot_ai_utilities.otel: handler {function_name!r} not found on {module_name!r}; "
             "call configure_otel() after defining the handler.\n"
         )
-        return
+        return False
 
     lambda_instrumentor = AwsLambdaInstrumentor()
     if not lambda_instrumentor.is_instrumented_by_opentelemetry:
@@ -268,7 +269,7 @@ def instrument_lambda_handler(
 
     current_handler = getattr(handler_module, function_name, None)
     if getattr(current_handler, _LAMBDA_HANDLER_MARKER, False):
-        return
+        return True
 
     def _flush_logs_wrapper(
         wrapped: Callable[..., Any],
@@ -292,6 +293,7 @@ def instrument_lambda_handler(
     if wrapped_handler is not None:
         with contextlib.suppress(Exception):
             setattr(wrapped_handler, _LAMBDA_HANDLER_MARKER, True)
+    return True
 
 
 class LambdaRuntime(Runtime):
@@ -308,8 +310,8 @@ class LambdaRuntime(Runtime):
         self.breaker = ExportCircuitBreaker(open_seconds=resolve_circuit_breaker_seconds())
         self.processor: TrackedBatchLogRecordProcessor | None = None
 
-    def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        super().apply_env_defaults(endpoint_configured=endpoint_configured)
+    def apply_env_defaults(self, *, can_export: bool) -> None:
+        super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
@@ -335,13 +337,13 @@ class LambdaRuntime(Runtime):
         # an ``atexit`` shutdown would bypass the outage circuit breaker and drain
         # queued records with a blocking export on exit.
         unregister_sdk_atexit(provider)
-        remove_lambda_runtime_stdout_handlers()
-        instrument_lambda_handler(processor=self.processor, breaker=self.breaker)
+        self.on_reconfigure()
 
     def on_reconfigure(self) -> None:
         # A second call after the handler is defined still wraps it, if the first call ran too early.
-        remove_lambda_runtime_stdout_handlers()
-        instrument_lambda_handler(processor=self.processor, breaker=self.breaker)
+        # Stdout is only dropped once the per-invocation flush is in place, or nothing would carry the logs.
+        if instrument_lambda_handler(processor=self.processor, breaker=self.breaker):
+            remove_lambda_runtime_stdout_handlers()
 
 
 def reset_inflight_flush() -> None:
