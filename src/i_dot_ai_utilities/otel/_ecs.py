@@ -27,13 +27,7 @@ from i_dot_ai_utilities.otel._attributes import iai_attribute
 from i_dot_ai_utilities.otel._emf import RateLimitedFailureSignal
 from i_dot_ai_utilities.otel._environment import env_number, keep_stdout_logs, logs_export_disabled
 from i_dot_ai_utilities.otel._export import FailureReportingExporter
-from i_dot_ai_utilities.otel._runtime import (
-    Runtime,
-    apply_aws_trace_env_defaults,
-    apply_common_env_defaults,
-    resource_attributes_from,
-    unregister_sdk_atexit,
-)
+from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
 from i_dot_ai_utilities.otel._stdout import install_stdout_handler
 
 if TYPE_CHECKING:
@@ -99,9 +93,10 @@ def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
 def install_sigterm_handler() -> bool:
     """Exit cleanly on SIGTERM when nothing else handles it. Returns True when installed.
 
-    Servers such as uvicorn and gunicorn install their own handler, which is
-    left in place. Without one, Python dies on SIGTERM without running
-    ``atexit``, so queued logs would be lost when ECS or Batch stops the task.
+    A handler that is already set is left in place. Without one, Python dies on
+    SIGTERM without running ``atexit``, so queued logs would be lost when ECS or
+    Batch stops the task. uvicorn needs this handler too: after its own graceful
+    shutdown it restores the previous handler and re-raises the signal.
     """
     if threading.current_thread() is not threading.main_thread():
         return False
@@ -114,7 +109,6 @@ def install_sigterm_handler() -> bool:
 class EcsRuntime(Runtime):
     """ECS on Fargate or EC2, and AWS Batch: background export, capped shutdown, stdout kept."""
 
-    name = "ecs"
     missing_endpoint_message = (
         "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set; "
         "continuing with OTLP log export disabled and logs on stdout only."
@@ -129,13 +123,13 @@ class EcsRuntime(Runtime):
         )
 
     def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        apply_common_env_defaults(logs_exporter="otlp" if endpoint_configured else "none")
+        super().apply_env_defaults(endpoint_configured=endpoint_configured)
         apply_aws_trace_env_defaults()
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS)
 
     def resource_attributes(self) -> dict[str, AttributeValue]:
-        attributes = resource_attributes_from(AwsEcsResourceDetector().detect())
+        attributes = dict(AwsEcsResourceDetector().detect().attributes)
         attributes.update(batch_resource_attributes())
         return attributes
 

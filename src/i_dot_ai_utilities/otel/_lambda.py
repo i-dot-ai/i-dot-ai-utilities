@@ -16,6 +16,7 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Any, Final
 
+from opentelemetry._logs import get_logger_provider
 from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
     OTEL_BLRP_MAX_QUEUE_SIZE,
@@ -34,13 +35,7 @@ from i_dot_ai_utilities.otel._export import (
     TrackedLogRecordExporter,
     resolve_circuit_breaker_seconds,
 )
-from i_dot_ai_utilities.otel._runtime import (
-    Runtime,
-    apply_aws_trace_env_defaults,
-    apply_common_env_defaults,
-    resource_attributes_from,
-    unregister_sdk_atexit,
-)
+from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -142,7 +137,12 @@ def _remaining_time_millis(context: Any) -> int | None:
 
 def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outcome: dict[str, bool]) -> None:
     try:
-        outcome["flushed"] = processor.force_flush(timeout_ms)
+        # Flush through the provider so every configured exporter is flushed, not only the tracked one.
+        provider = get_logger_provider()
+        if hasattr(provider, "force_flush"):
+            outcome["flushed"] = bool(provider.force_flush(timeout_ms))
+        else:
+            outcome["flushed"] = processor.force_flush(timeout_ms)
     except Exception:  # noqa: BLE001 - flush must never break the handler
         outcome["flushed"] = False
 
@@ -297,7 +297,6 @@ def instrument_lambda_handler(
 class LambdaRuntime(Runtime):
     """AWS Lambda: synchronous, time-bounded flush at the end of every invocation."""
 
-    name = "lambda"
     self_instrumented = frozenset({"aws-lambda"})
     missing_endpoint_message = (
         "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set on Lambda; "
@@ -310,7 +309,7 @@ class LambdaRuntime(Runtime):
         self.processor: TrackedBatchLogRecordProcessor | None = None
 
     def apply_env_defaults(self, *, endpoint_configured: bool) -> None:
-        apply_common_env_defaults(logs_exporter="otlp" if endpoint_configured else "none")
+        super().apply_env_defaults(endpoint_configured=endpoint_configured)
         apply_aws_trace_env_defaults()
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
@@ -323,7 +322,7 @@ class LambdaRuntime(Runtime):
         )
 
     def resource_attributes(self) -> dict[str, AttributeValue]:
-        return resource_attributes_from(AwsLambdaResourceDetector().detect())
+        return dict(AwsLambdaResourceDetector().detect().attributes)
 
     def log_record_processor(self, exporter: LogRecordExporter) -> LogRecordProcessor:
         processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(exporter, self.breaker))

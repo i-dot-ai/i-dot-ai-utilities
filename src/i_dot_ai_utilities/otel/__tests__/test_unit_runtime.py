@@ -57,6 +57,7 @@ class TestAttributeNames:
             "exception.stacktrace",
             "aws.ecs.task.arn",
             "http.request.header.x_request_id",
+            "http.request.header.content-type",
         ],
     )
     def test_valid_names(self, name: str) -> None:

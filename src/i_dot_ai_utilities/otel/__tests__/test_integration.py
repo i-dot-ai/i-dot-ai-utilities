@@ -301,6 +301,18 @@ class TestLambdaEndToEnd:
             assert "Authorisation request started for dual" in summary["runtime_handler_output"]
             assert [rec.body for rec in server.log_records] == ["Authorisation request started for dual"]
 
+    def test_flush_reaches_otlp_when_another_exporter_is_listed_first(self) -> None:
+        with OtlpCaptureServer() as server:
+            _run_scenario(
+                [{"request_id": "req-two", "remaining_ms": 4500, "event": {"mode": "ok", "application": "two"}}],
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "OTEL_SERVICE_NAME": "core-auth-api",
+                    "OTEL_LOGS_EXPORTER": "console,otlp",
+                },
+            )
+            assert [rec.body for rec in server.log_records] == ["Authorisation request started for two"]
+
     def test_exporter_none_keeps_runtime_stdout_logging(self) -> None:
         _, summary = _run_scenario(
             [{"request_id": "req-off", "remaining_ms": 4500, "event": {"mode": "ok", "application": "off"}}],
@@ -376,6 +388,31 @@ class TestLambdaEndToEnd:
         assert proc.returncode == 0, f"stderr={proc.stderr!r}"
         assert "hello-local-console" in proc.stdout
         assert "using console log exporter" in proc.stderr
+
+    def test_otlp_handler_survives_application_logging_config(self) -> None:
+        # Alembic's env.py and many apps reconfigure logging after start-up, which replaces root handlers.
+        script = (
+            "import logging, logging.config\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "provider = configure_otel(service_name='reconfigured-svc')\n"
+            "logging.config.dictConfig({'version': 1, 'disable_existing_loggers': False,\n"
+            "    'handlers': {'console': {'class': 'logging.StreamHandler'}},\n"
+            "    'root': {'handlers': ['console'], 'level': 'INFO'}})\n"
+            "logging.getLogger('app').info('after-dictconfig')\n"
+            "provider.force_flush()\n"
+        )
+        with OtlpCaptureServer() as server:
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "AWS_LAMBDA_"))}
+            env["OTEL_EXPORTER_OTLP_ENDPOINT"] = server.base_url
+            proc = subprocess.run(  # noqa: S603
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            assert proc.returncode == 0, f"stderr={proc.stderr!r}"
+            assert [rec.body for rec in server.log_records] == ["after-dictconfig"]
 
 
 class TestImportBoundaries:

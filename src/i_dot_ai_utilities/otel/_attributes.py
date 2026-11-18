@@ -25,7 +25,6 @@ ENV_STRICT_ATTRIBUTES: Final[str] = "I_DOT_AI_OTEL_STRICT_ATTRIBUTES"
 _SEGMENT: Final[str] = r"[a-z][a-z0-9_]*"
 # ``i_ai.<service>.<property>`` at minimum; deeper ``<object>.<property>`` levels are allowed.
 _I_AI_NAME: Final[re.Pattern[str]] = re.compile(rf"{I_AI_NAMESPACE}(\.{_SEGMENT}){{2,}}")
-_SUFFIX: Final[re.Pattern[str]] = re.compile(rf"{_SEGMENT}(\.{_SEGMENT})*")
 _SEMCONV_CONSTANT: Final[re.Pattern[str]] = re.compile(r'^([A-Z][A-Z0-9_]*): Final = "([^"]+)"', re.MULTILINE)
 _SEMCONV_PACKAGES: Final[tuple[str, ...]] = (
     "opentelemetry.semconv.attributes",
@@ -58,12 +57,12 @@ def is_semconv_attribute(name: str) -> bool:
     """Return True when ``name`` is in the OpenTelemetry attribute registry.
 
     Template attributes such as ``http.request.header.<key>`` match any
-    lowercase suffix.
+    non-empty ``<key>``, because the key is set by the source (``content-type``).
     """
     names, template_prefixes = _semconv_registry()
     if name in names:
         return True
-    return any(name.startswith(prefix) and _SUFFIX.fullmatch(name[len(prefix) :]) for prefix in template_prefixes)
+    return any(len(name) > len(prefix) and name.startswith(prefix) for prefix in template_prefixes)
 
 
 @functools.lru_cache(maxsize=4096)
@@ -112,10 +111,6 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
     def __init__(self, delegate: LogRecordProcessor) -> None:
         self._delegate = delegate
         self._strict = env_flag(ENV_STRICT_ATTRIBUTES, default=False)
-
-    @property
-    def delegate(self) -> LogRecordProcessor:
-        return self._delegate
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
         attributes = log_record.log_record.attributes

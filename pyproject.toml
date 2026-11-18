@@ -159,17 +159,9 @@ all = [
     "azure-storage-blob>=12.26.0",
     "grpcio-status>=1.76.0",
     "django>=4.2,<6.0",
-    "opentelemetry-api>=1.45.0",
-    "opentelemetry-sdk>=1.45.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.45.0",
-    "opentelemetry-distro>=0.66b1",
-    "opentelemetry-instrumentation>=0.66b1",
-    "opentelemetry-instrumentation-aws-lambda>=0.66b1",
-    "opentelemetry-instrumentation-botocore>=0.66b1",
-    "opentelemetry-instrumentation-django>=0.66b1",
-    "opentelemetry-instrumentation-fastapi>=0.66b1",
-    "opentelemetry-propagator-aws-xray>=1.0.2",
-    "opentelemetry-sdk-extension-aws>=2.1.0",
+    # Reuse the native extras so `all` keeps their OpenTelemetry version caps.
+    "i-dot-ai-utilities[otel_native_lambda,otel_native_fastapi]",
+    "opentelemetry-instrumentation-django>=0.66b1,<0.67",
 ]
 
 [tool.mypy]

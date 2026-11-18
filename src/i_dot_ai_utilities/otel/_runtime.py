@@ -28,15 +28,9 @@ from i_dot_ai_utilities.otel._stdout import install_stdout_handler
 if TYPE_CHECKING:
     from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
-    from opentelemetry.sdk.resources import Resource
     from opentelemetry.util.types import AttributeValue
 
 RuntimeName = Literal["lambda", "ecs", "local"]
-
-
-def resource_attributes_from(resource: Resource) -> dict[str, AttributeValue]:
-    """Return a detector's resource attributes as a plain dict for ``OpenTelemetryConfigurator``."""
-    return dict(resource.attributes)
 
 
 def apply_common_env_defaults(*, logs_exporter: str) -> None:
@@ -66,7 +60,6 @@ def unregister_sdk_atexit(provider: LoggerProvider) -> None:
 class Runtime:
     """Default behaviour for one execution environment. Subclasses override single steps."""
 
-    name: ClassVar[RuntimeName]
     missing_endpoint_message: ClassVar[str]
     # Entry point names the runtime instruments itself instead of the generic loader.
     self_instrumented: ClassVar[frozenset[str]] = frozenset()
@@ -94,7 +87,6 @@ class Runtime:
 class LocalRuntime(Runtime):
     """Developer machines and anything not detected as AWS."""
 
-    name = "local"
     missing_endpoint_message = (
         "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set; using console log exporter."
     )
@@ -109,6 +101,5 @@ __all__ = [
     "RuntimeName",
     "apply_aws_trace_env_defaults",
     "apply_common_env_defaults",
-    "resource_attributes_from",
     "unregister_sdk_atexit",
 ]

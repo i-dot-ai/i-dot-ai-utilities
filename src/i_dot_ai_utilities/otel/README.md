@@ -62,7 +62,13 @@ Every log line inside a request carries that request's `trace_id` and `span_id`.
 
 uvicorn's own server and access logs are not exported over OTLP. uvicorn turns off propagation on its `uvicorn` and `uvicorn.access` loggers, so they never reach the root handler and stay on uvicorn's console output only.
 
-Under gunicorn, keep `configure_otel()` at module level in the app module. With the default (no `--preload`), each worker imports the app and configures itself. With `--preload`, the SDK restarts its export thread in each worker after the fork. Unknown: whether gunicorn workers run `atexit` on shutdown, which decides whether their last queued logs are flushed. They are on stdout either way.
+Under gunicorn, keep `configure_otel()` at module level in the app module. With the default (no `--preload`), each worker imports the app and configures itself. With `--preload`, the SDK restarts its export thread in each worker after the fork. A uvicorn worker without `--preload` flushes its queued logs when gunicorn stops it (checked with gunicorn 27.0 and uvicorn 0.54). Unknown: whether sync workers and `--preload` workers do the same. Their logs are on stdout either way.
+
+## Django
+
+There is no `otel_native_django` extra yet. `configure_otel()` still enables the Django instrumentation whenever `opentelemetry-instrumentation-django` is installed, which the `all` and legacy `otel_django` extras do.
+
+Set `DJANGO_SETTINGS_MODULE` before calling `configure_otel()`. If it is unset, the instrumentor configures Django with empty settings, and the project's own settings are never loaded. To turn the instrumentation off, set `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=django`.
 
 ## AWS Batch jobs and plain scripts
 
@@ -83,7 +89,11 @@ if __name__ == "__main__":
     main()
 ```
 
-When ECS or Batch stops a task it sends SIGTERM. Python's default reaction kills the process without running `atexit`, so queued logs would be lost. On the `ecs` runtime, `configure_otel()` installs a SIGTERM handler that exits with code `143` (`128 + SIGTERM`) through `sys.exit`, so `finally` blocks and the log flush run. It only does this when no SIGTERM handler is already set. Servers such as uvicorn and gunicorn keep their own handler.
+When ECS or Batch stops a task it sends SIGTERM. Python's default reaction kills the process without running `atexit`, so queued logs would be lost. On the `ecs` runtime, `configure_otel()` installs a SIGTERM handler that exits with code `143` (`128 + SIGTERM`) through `sys.exit`, so `finally` blocks and the log flush run. It only does this when no SIGTERM handler is already set.
+
+This covers `uvicorn main:app` too. uvicorn imports the app before it sets its own handler, and after its graceful shutdown it restores this one and re-raises the signal.
+
+Python waits for non-daemon threads to finish before it runs the flush. A background thread that never stops holds the process until ECS kills it, and the queued logs are lost from OTLP. Create background threads with `daemon=True`, or stop them in a `finally` block.
 
 ## Lambda
 
@@ -135,7 +145,7 @@ validate_attributes({"user.email": email, iai_attribute("auth.token.key_id"): ke
 validate_attributes({"application": "casework"})  # raises ValueError listing "application"
 ```
 
-`iai_attribute()` requires at least `<service>.<property>`. `validate_attributes()` accepts any name in the semantic convention registry that ships with the installed SDK, including template names such as `http.request.header.<key>`, plus any well-formed `i_ai.` name.
+`iai_attribute()` requires at least `<service>.<property>`. `validate_attributes()` accepts any name in the semantic convention registry that ships with the installed SDK, including template names such as `http.request.header.<key>` with any key (`http.request.header.content-type`), plus any well-formed `i_ai.` name.
 
 ### Enforcement
 
@@ -213,6 +223,8 @@ On Lambda, `configure_otel()` removes the runtime's own `awslambdaric` stdout ha
 ## Log levels
 
 `configure_otel()` lowers the root logger from Python's default `WARNING` to `INFO`, so `logger.info(...)` works without extra set-up. It cannot tell the default from a deliberate `WARNING`. To keep `WARNING`, set it after calling `configure_otel()`.
+
+The OpenTelemetry handler stays on the root logger when the application later calls `logging.config.dictConfig`, `fileConfig` or `basicConfig`. Those calls can still change the root level. Alembic's default `alembic.ini` sets it to `WARN`, so `INFO` logs stop after a migration runs in the same process unless you change that file.
 
 It sets the `botocore`, `boto3` and `urllib3` loggers to `WARNING` so their INFO messages are not exported, unless your application set their level first.
 

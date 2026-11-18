@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 from opentelemetry import propagate
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.distro import OpenTelemetryConfigurator
+from opentelemetry.sdk._configuration import _overwrite_logging_config_fns
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk.environment_variables import OTEL_SERVICE_NAME
 
@@ -125,6 +126,10 @@ def _install_root_handler(provider: LoggerProvider) -> LoggingHandler:
     handler = _build_sdk_logging_handler(provider)
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
+    # SDK internal: keeps the handler on the root logger when the application later calls
+    # ``dictConfig``, ``fileConfig`` or ``basicConfig`` (Alembic's ``env.py`` does), which
+    # would otherwise remove it and stop OTLP export without any error.
+    _overwrite_logging_config_fns(handler)
     if root_logger.level == logging.WARNING:
         # Python's root logger defaults to WARNING; lower it to INFO when still at that
         # default so ``logging.getLogger(__name__).info(...)`` works out of the box. An app
