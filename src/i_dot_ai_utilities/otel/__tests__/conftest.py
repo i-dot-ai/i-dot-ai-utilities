@@ -1,5 +1,12 @@
 # ruff: noqa: SLF001 - these tests deliberately inspect private state and SDK internals.
-"""Shared fixtures for native OTel tests."""
+"""Shared fixtures and test doubles for ``i_dot_ai_utilities.otel`` tests.
+
+Important SDK constraint: OpenTelemetry's global ``set_tracer_provider`` and
+``set_logger_provider`` hooks use ``Once`` guards that cannot be reset within a
+process. Unit tests therefore construct local ``LoggerProvider()`` and
+``TracerProvider()`` instances in-process, while any test that calls
+``configure_otel()`` runs in a fresh Python subprocess.
+"""
 
 from __future__ import annotations
 
@@ -69,7 +76,11 @@ class ControllableLogExporter(LogRecordExporter):
 
 
 def reset_otel_state() -> None:
-    """Undo everything ``configure_otel`` did in this process."""
+    """Reset module-level state, root handlers, and instrumentors between in-process unit tests.
+
+    Does not reset the OpenTelemetry SDK's global provider ``Once`` locks; run
+    ``configure_otel()`` calls in a subprocess instead of in-process.
+    """
     state = _configuration._state
     root_logger = logging.getLogger()
     if state.root_logging_handler is not None and state.root_logging_handler in root_logger.handlers:

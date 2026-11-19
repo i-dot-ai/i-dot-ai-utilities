@@ -8,10 +8,12 @@ import logging
 import os
 import subprocess
 import sys
+import types
 from typing import Any
 
 import pytest
 
+from i_dot_ai_utilities.otel import _lambda
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
 from i_dot_ai_utilities.otel.__tests__.fixtures.otlp_capture_server import OtlpCaptureServer
 from i_dot_ai_utilities.otel._emf import EMF_EVENT_NAME, EMF_METRIC_NAME, EMF_NAMESPACE
@@ -24,11 +26,13 @@ from i_dot_ai_utilities.otel._export import (
     TrackedLogRecordExporter,
     resolve_circuit_breaker_seconds,
 )
+from i_dot_ai_utilities.otel._instrumentation import uninstrument_installed_libraries
 from i_dot_ai_utilities.otel._lambda import (
     DEFAULT_FLUSH_MARGIN_MS,
     ENV_FLUSH_MARGIN_MS,
     LambdaRuntime,
     flush_lambda_logs,
+    instrument_lambda_handler,
     is_lambda_runtime_stdout_handler,
     remove_lambda_runtime_stdout_handlers,
     resolve_flush_margin_ms,
@@ -134,6 +138,17 @@ class TestLambdaEnvAndHandlerResolution:
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT", "1.5")
         assert resolve_logs_export_timeout_ms() == 1500
 
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "3")
+        assert resolve_logs_export_timeout_ms() == 3000
+
+        LambdaRuntime(service_name="svc").apply_env_defaults(can_export=True)
+        assert "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT" not in os.environ
+
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TIMEOUT")
+        LambdaRuntime(service_name="svc").apply_env_defaults(can_export=True)
+        assert os.environ["OTEL_EXPORTER_OTLP_LOGS_TIMEOUT"] == "2"
+
     def test_resolves_handler_target_from_orig_handler_or_slash_delimited_handler(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -142,14 +157,34 @@ class TestLambdaEnvAndHandlerResolution:
         monkeypatch.delenv("_HANDLER", raising=False)
         assert resolve_lambda_handler_target() is None
 
-        monkeypatch.setenv("_HANDLER", "invalid_no_dot")
-        assert resolve_lambda_handler_target() is None
+        for invalid in ("invalid_no_dot", ".missing_module", "missing_func."):
+            monkeypatch.setenv("_HANDLER", invalid)
+            assert resolve_lambda_handler_target() is None
 
         monkeypatch.setenv("_HANDLER", "api/handlers/authorise_token.lambda_handler")
         assert resolve_lambda_handler_target() == ("api.handlers.authorise_token", "lambda_handler")
 
         monkeypatch.setenv("ORIG_HANDLER", "pkg.mod.orig_handler")
         assert resolve_lambda_handler_target() == ("pkg.mod", "orig_handler")
+
+    def test_warns_and_skips_wrapping_when_handler_env_is_unset_or_module_import_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.delenv("ORIG_HANDLER", raising=False)
+        monkeypatch.delenv("_HANDLER", raising=False)
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+
+        assert instrument_lambda_handler(processor=None, breaker=breaker) is False
+        assert "ORIG_HANDLER/_HANDLER is not set; skipping Lambda handler wrapping." in capsys.readouterr().err
+
+        monkeypatch.setenv("_HANDLER", "nonexistent_lambda_module_xyz.handler")
+        assert instrument_lambda_handler(processor=None, breaker=breaker) is False
+        assert (
+            "failed to import handler module 'nonexistent_lambda_module_xyz'; skipping handler wrapping."
+            in capsys.readouterr().err
+        )
 
 
 class TestLambdaStdoutHandlers:
@@ -235,6 +270,57 @@ class TestLambdaStdoutHandlers:
         finally:
             root_logger.removeHandler(runtime_handler)
 
+    def test_second_reconfigure_after_handler_definition_wraps_handler_and_removes_runtime_stdout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Calling ``configure_otel()`` again once ``def handler`` exists recovers wrapping and stdout opt-out."""
+
+        class LambdaLoggerHandler(logging.StreamHandler):  # type: ignore[type-arg]
+            pass
+
+        LambdaLoggerHandler.__module__ = "awslambdaric.bootstrap"
+        temp_mod = types.ModuleType("temp_late_lambda_mod")
+        monkeypatch.setitem(sys.modules, "temp_late_lambda_mod", temp_mod)
+        monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "false")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT", "2")
+        monkeypatch.setenv(ENV_FLUSH_MARGIN_MS, "250")
+        monkeypatch.setenv("_HANDLER", "temp_late_lambda_mod.handler")
+        monkeypatch.delenv("ORIG_HANDLER", raising=False)
+
+        runtime_handler = LambdaLoggerHandler(io.StringIO())
+        root_logger = logging.getLogger()
+        root_logger.addHandler(runtime_handler)
+        runtime = LambdaRuntime(service_name="svc")
+        delegate = ControllableLogExporter()
+        processor = runtime.log_record_processor(delegate)
+        try:
+            runtime.on_reconfigure()
+            assert runtime_handler in root_logger.handlers
+
+            def handler(_event: dict[str, Any], context: Any = None) -> dict[str, int]:
+                _ = context
+                return {"statusCode": 200}
+
+            temp_mod.handler = handler  # type: ignore[attr-defined]
+            runtime.on_reconfigure()
+            runtime.on_reconfigure()  # idempotent once wrapped
+            assert runtime_handler not in root_logger.handlers
+
+            class _LowTimeCtx:
+                @staticmethod
+                def get_remaining_time_in_millis() -> int:
+                    return 100
+
+            assert temp_mod.handler({}, context=_LowTimeCtx()) == {"statusCode": 200}
+            assert not runtime.breaker.is_open()
+        finally:
+            uninstrument_installed_libraries()
+            if runtime_handler in root_logger.handlers:
+                root_logger.removeHandler(runtime_handler)
+            processor.shutdown()
+
 
 class TestLambdaFlushBudget:
     """Flushing yields to the handler response when the invocation is close to its Lambda timeout."""
@@ -267,6 +353,79 @@ class TestLambdaFlushBudget:
             assert flushed is False
             assert not breaker.is_open()
             assert failures == []
+        finally:
+            processor.shutdown()
+
+    def test_flush_failure_without_exporter_error_opens_breaker_and_emits_flush_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+        assert flush_lambda_logs(None, processor=None, breaker=breaker) is True
+
+        delegate = ControllableLogExporter()
+        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        failures: list[str] = []
+        try:
+
+            class _FalseFlushProvider:
+                @staticmethod
+                def force_flush(_timeout_millis: int) -> bool:
+                    return False
+
+            monkeypatch.setattr(_lambda, "get_logger_provider", _FalseFlushProvider)
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is False
+            )
+            assert breaker.is_open()
+            assert failures == ["flush_failure"]
+
+            breaker.record_success()
+            failures.clear()
+
+            class _RaisingFlushProvider:
+                @staticmethod
+                def force_flush(_timeout_millis: int) -> bool:
+                    msg = "provider flush failed"
+                    raise RuntimeError(msg)
+
+            monkeypatch.setattr(_lambda, "get_logger_provider", _RaisingFlushProvider)
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is False
+            )
+            assert breaker.is_open()
+            assert failures == ["flush_failure"]
+
+            breaker.record_success()
+            monkeypatch.setattr(_lambda, "get_logger_provider", object)
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is True
+            )
+        finally:
+            processor.shutdown()
+
+    def test_flushes_normally_when_context_remaining_time_raises_or_returns_non_number(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(_lambda, "get_logger_provider", object)
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(ControllableLogExporter(), breaker))
+
+        class _BrokenCtx:
+            @staticmethod
+            def get_remaining_time_in_millis() -> int:
+                msg = "context unavailable"
+                raise RuntimeError(msg)
+
+        class _StringTimeCtx:
+            @staticmethod
+            def get_remaining_time_in_millis() -> str:
+                return "not-a-number"
+
+        try:
+            assert flush_lambda_logs(_BrokenCtx(), processor=processor, breaker=breaker) is True
+            assert flush_lambda_logs(_StringTimeCtx(), processor=processor, breaker=breaker) is True
         finally:
             processor.shutdown()
 

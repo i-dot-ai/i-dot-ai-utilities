@@ -24,6 +24,7 @@ from i_dot_ai_utilities.otel.__tests__.fixtures.ecs_metadata_server import (
 from i_dot_ai_utilities.otel.__tests__.fixtures.otlp_capture_server import OtlpCaptureServer
 from i_dot_ai_utilities.otel._ecs import (
     ENV_SHUTDOWN_TIMEOUT_MS,
+    EcsRuntime,
     batch_resource_attributes,
     install_sigterm_handler,
     register_capped_shutdown,
@@ -97,6 +98,32 @@ class TestEcsAndBatchHelpers:
         finally:
             signal.signal(signal.SIGTERM, previous)
 
+    def test_installs_sigterm_handler_returns_false_off_main_thread(self) -> None:
+        previous = signal.getsignal(signal.SIGTERM)
+        outcomes: list[bool] = []
+        try:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            worker = threading.Thread(target=lambda: outcomes.append(install_sigterm_handler()))
+            worker.start()
+            worker.join(timeout=5.0)
+            assert outcomes == [False]
+            assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+    def test_ecs_env_defaults_set_5s_logs_timeout_unless_general_timeout_is_set(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT", raising=False)
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "12")
+        EcsRuntime(service_name="svc").apply_env_defaults(can_export=True)
+        assert "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT" not in os.environ
+
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TIMEOUT")
+        EcsRuntime(service_name="svc").apply_env_defaults(can_export=True)
+        assert os.environ["OTEL_EXPORTER_OTLP_LOGS_TIMEOUT"] == "5"
+
     def test_replaces_unbounded_sdk_atexit_hook_with_capped_shutdown(self) -> None:
         """The SDK's ``atexit`` hook waits up to 30 s, which exhausts the default 30 s ECS ``stopTimeout``."""
         provider = LoggerProvider()
@@ -127,6 +154,14 @@ class TestEcsAndBatchHelpers:
 
         monkeypatch.setattr(_ecs, "get_logger_provider", object)
         assert flush_otel() is False
+
+        class _FastProvider:
+            @staticmethod
+            def force_flush(_timeout_millis: int) -> bool:
+                return True
+
+        monkeypatch.setattr(_ecs, "get_logger_provider", _FastProvider)
+        assert flush_otel() is True
 
 
 class TestEcsFastApiEndToEnd:

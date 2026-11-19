@@ -379,4 +379,4 @@ To support a new runtime, subclass `Runtime` in `_runtime.py`, override only the
 make test-otel
 ```
 
-The integration tests run each scenario in a subprocess against a loopback OTLP capture server and, for ECS, a fake task metadata endpoint. They cover outage, hung gateway, rejected exports, shutdown time, SIGTERM and stdout behaviour.
+The integration tests run each scenario in a subprocess against a loopback OTLP capture server and, for ECS, a fake task metadata endpoint, because the OpenTelemetry SDK only allows global providers to be set once per Python process. In-process unit tests construct local `LoggerProvider` and `TracerProvider` instances directly (see `__tests__/conftest.py`).

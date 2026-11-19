@@ -7,12 +7,15 @@ import logging
 import warnings
 from typing import TYPE_CHECKING
 
+from opentelemetry.context import Context
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import (
     InMemoryLogRecordExporter,
     LogRecordExportResult,
 )
+from opentelemetry.sdk.trace import TracerProvider
 
+from i_dot_ai_utilities.otel import _emf
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
 
 if TYPE_CHECKING:
@@ -78,6 +81,89 @@ class TestTrackedExporterAndBatchProcessor:
         assert tracked.export([]) is LogRecordExportResult.FAILURE
         assert breaker.is_open()
         assert tracked.consume_failure() is True
+        assert tracked.force_flush() is True
+        tracked.shutdown()
+        assert delegate.shutdown_called is True
+
+    def test_buffers_records_in_fifo_order_preserving_trace_ids_while_breaker_is_open_and_flushes_after_cooldown(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Open-breaker records clear ``Context()`` to avoid pinning spans in memory while keeping hex IDs and order."""
+        monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "60000")
+        tracer = TracerProvider().get_tracer("test.breaker.fifo")
+        clock = FakeClock()
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
+        delegate = ControllableLogExporter(result=LogRecordExportResult.SUCCESS)
+        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        provider = LoggerProvider()
+        provider.add_log_record_processor(processor)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
+
+        test_logger = logging.getLogger("test.breaker.fifo")
+        test_logger.setLevel(logging.INFO)
+        test_logger.propagate = False
+        test_logger.addHandler(handler)
+        try:
+            breaker.record_failure()
+            with tracer.start_as_current_span("invocation") as span:
+                expected_tid = span.get_span_context().trace_id
+                expected_sid = span.get_span_context().span_id
+                test_logger.info("msg-1")
+                test_logger.info("msg-2")
+
+            assert delegate.batches == []
+            assert processor._queue is not None  # noqa: SLF001
+            assert all(rec.log_record.context == Context() for rec in processor._queue)  # noqa: SLF001
+
+            clock.advance(30.1)
+            assert processor.force_flush() is True
+            assert len(delegate.batches) == 1
+            exported = delegate.batches[0]
+            assert [rec.log_record.body for rec in exported] == ["msg-1", "msg-2"]
+            assert [rec.log_record.trace_id for rec in exported] == [expected_tid, expected_tid]
+            assert [rec.log_record.span_id for rec in exported] == [expected_sid, expected_sid]
+        finally:
+            test_logger.removeHandler(handler)
+            processor.shutdown()
+
+    def test_open_breaker_drops_oldest_records_when_bounded_queue_fills(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OTEL_BLRP_MAX_QUEUE_SIZE", "2")
+        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "2")
+        monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "60000")
+        clock = FakeClock()
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
+        delegate = ControllableLogExporter(result=LogRecordExportResult.SUCCESS)
+        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        provider = LoggerProvider()
+        provider.add_log_record_processor(processor)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
+
+        test_logger = logging.getLogger("test.breaker.eviction")
+        test_logger.setLevel(logging.INFO)
+        test_logger.propagate = False
+        test_logger.addHandler(handler)
+        try:
+            breaker.record_failure()
+            test_logger.info("msg-1")
+            test_logger.info("msg-2")
+            test_logger.info("msg-3")
+
+            clock.advance(30.1)
+            assert processor.force_flush() is True
+            assert [rec.log_record.body for rec in delegate.batches[0]] == ["msg-2", "msg-3"]
+        finally:
+            test_logger.removeHandler(handler)
+            processor.shutdown()
 
     def test_aborts_remaining_queued_batches_after_first_failed_export(
         self,
@@ -140,6 +226,17 @@ class TestFailureReportingExporter:
         )
         assert reasons == ["export_failure"]
 
+    def test_invokes_failure_callback_when_delegate_returns_failure_status_and_delegates_lifecycle(self) -> None:
+        reasons: list[str] = []
+        delegate = ControllableLogExporter(result=LogRecordExportResult.FAILURE, flush_result=False)
+        exporter = FailureReportingExporter(delegate, reasons.append)
+
+        assert exporter.export([]) is LogRecordExportResult.FAILURE
+        assert reasons == ["export_failure"]
+        assert exporter.force_flush() is False
+        exporter.shutdown()
+        assert delegate.shutdown_called is True
+
 
 class TestCloudWatchEmfSignals:
     """Failed exports write sanitised CloudWatch EMF JSON lines to stdout so alarms fire during outages."""
@@ -181,3 +278,22 @@ class TestCloudWatchEmfSignals:
         lines = capsys.readouterr().out.splitlines()
         assert len(lines) == 1
         assert json.loads(lines[0])["ServiceName"] == "svc"
+
+    def test_container_failure_signal_emits_again_once_interval_elapses(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        clock = FakeClock(100.0)
+        monkeypatch.setattr(_emf.time, "monotonic", clock)
+        signal_ = RateLimitedFailureSignal(dimension="ServiceName", value="svc", interval_seconds=60.0)
+
+        signal_("export_failure")
+        clock.advance(59.9)
+        signal_("export_failure")
+        clock.advance(0.2)
+        signal_("export_failure")
+
+        lines = capsys.readouterr().out.splitlines()
+        assert len(lines) == 2
+        assert [json.loads(line)["reason"] for line in lines] == ["export_failure", "export_failure"]

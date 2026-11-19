@@ -18,14 +18,22 @@ from opentelemetry.sdk._logs.export import (
 )
 
 import i_dot_ai_utilities.otel as public_otel
+from i_dot_ai_utilities.otel import _instrumentation
 from i_dot_ai_utilities.otel.__tests__.fixtures.otlp_capture_server import OtlpCaptureServer
 from i_dot_ai_utilities.otel._configuration import (
     _ExcludeInternalOtelFilter,
     _install_root_handler,
+    _resolve_service_name,
+    _warn_once,
     configure_otel,
     detect_runtime,
 )
-from i_dot_ai_utilities.otel._instrumentation import disabled_instrumentations
+from i_dot_ai_utilities.otel._environment import has_otlp_logs_endpoint
+from i_dot_ai_utilities.otel._instrumentation import (
+    disabled_instrumentations,
+    instrument_installed_libraries,
+    uninstrument_installed_libraries,
+)
 
 
 def _clean_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -242,6 +250,60 @@ class TestServiceNameResolution:
             (stdout_line,) = proc.stdout.splitlines()
             assert json.loads(stdout_line)["message"] == "kept-on-stdout"
 
+    def test_resolves_service_name_from_otel_resource_attributes_before_argument(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("OTEL_SERVICE_NAME", raising=False)
+        monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "service.name=attr-svc,service.namespace=casework")
+        assert _resolve_service_name("fallback-svc") == "attr-svc"
+
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "env-svc")
+        assert _resolve_service_name("fallback-svc") == "env-svc"
+
+    def test_detects_logs_specific_otlp_endpoint_without_base_endpoint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+        assert has_otlp_logs_endpoint() is False
+
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://127.0.0.1:4318/v1/logs")
+        assert has_otlp_logs_endpoint() is True
+
+
+class TestAwsTracingDefaults:
+    """AWS runtimes generate X-Ray compatible trace IDs and let W3C ``tracecontext`` override ``X-Amzn-Trace-Id``."""
+
+    def test_aws_runtimes_generate_xray_trace_ids_and_prefer_w3c_over_xray_headers(self) -> None:
+        script = (
+            "import json, time\n"
+            "from opentelemetry import propagate, trace\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "configure_otel(service_name='svc', runtime='ecs')\n"
+            "tracer = trace.get_tracer('test')\n"
+            "now = int(time.time())\n"
+            "with tracer.start_as_current_span('root') as sp:\n"
+            "    generated = format(sp.get_span_context().trace_id, '032x')\n"
+            "xray = 'Root=1-67000001-111111111111111111111111;Parent=2222222222222222;Sampled=1'\n"
+            "w3c = '00-33333333333333333333333333333333-4444444444444444-01'\n"
+            "ctx_xray = propagate.extract({'X-Amzn-Trace-Id': xray})\n"
+            "ctx_both = propagate.extract({'X-Amzn-Trace-Id': xray, 'traceparent': w3c})\n"
+            "print(json.dumps({\n"
+            "    'now': now,\n"
+            "    'generated': generated,\n"
+            "    'xray_only': format(trace.get_current_span(ctx_xray).get_span_context().trace_id, '032x'),\n"
+            "    'both': format(trace.get_current_span(ctx_both).get_span_context().trace_id, '032x'),\n"
+            "}))\n"
+        )
+        proc = _run_python(script, env_overrides={"I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false"})
+        result = json.loads(proc.stdout.strip())
+        epoch_prefix = int(result["generated"][:8], 16)
+        assert abs(epoch_prefix - int(result["now"])) < 60
+        assert result["xray_only"] == "67000001111111111111111111111111"
+        assert result["both"] == "33333333333333333333333333333333"
+
 
 class TestRootLoggerSetup:
     """The root OpenTelemetry handler prevents exporter recursion, quiets noisy SDKs, and survives dictConfig."""
@@ -303,13 +365,190 @@ class TestRootLoggerSetup:
             )
             assert [rec.body for rec in server.log_records] == ["after-dictconfig"]
 
+    def test_preserves_preconfigured_root_logger_level_other_than_default_warning(self) -> None:
+        root_logger = logging.getLogger()
+        saved_level = root_logger.level
+        provider = LoggerProvider()
+        root_logger.setLevel(logging.ERROR)
+        handler = _install_root_handler(provider)
+        try:
+            assert root_logger.level == logging.ERROR
+        finally:
+            root_logger.removeHandler(handler)
+            root_logger.setLevel(saved_level)
+            provider.shutdown()
 
-class TestInstrumentationConfig:
-    """``OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`` lets services skip individual auto-instrumentors."""
+    def test_repeat_configure_otel_returns_same_provider_without_duplicating_handlers(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _warn_once("duplicate-check", "warned once")
+        _warn_once("duplicate-check", "warned once")
+        assert capsys.readouterr().err.count("warned once") == 1
+
+        script = (
+            "import json, logging\n"
+            "from opentelemetry.sdk._logs import LoggingHandler\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "from i_dot_ai_utilities.otel._stdout import JsonStdoutHandler\n"
+            "p1 = configure_otel(service_name='svc')\n"
+            "p2 = configure_otel(service_name='svc')\n"
+            "handlers = logging.getLogger().handlers\n"
+            "print(json.dumps({\n"
+            "    'same_provider': p1 is p2,\n"
+            "    'otel_handlers': sum(isinstance(h, LoggingHandler) for h in handlers),\n"
+            "    'stdout_handlers': sum(isinstance(h, JsonStdoutHandler) for h in handlers),\n"
+            "}))\n"
+        )
+        proc = _run_python(script)
+        result = json.loads(proc.stdout.strip())
+        assert result == {"same_provider": True, "otel_handlers": 1, "stdout_handlers": 1}
+
+
+class TestAutoInstrumentation:
+    """Entry-point loader respects disable flags, skips version conflicts, and fails open on broken hooks."""
 
     def test_parses_comma_separated_disabled_instrumentations(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", " fastapi , botocore,,")
         assert disabled_instrumentations() == {"fastapi", "botocore"}
+
+    def test_skips_disabled_wildcard_and_runtime_self_instrumented_entry_points(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        instrumented_calls: list[str] = []
+
+        class _StubEntryPoint:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.dist = None
+
+            def load(self) -> object:
+                ep_name = self.name
+
+                class _Instrumentor:
+                    is_instrumented_by_opentelemetry = False
+
+                    def instrument(self, *, skip_dep_check: bool = False) -> None:
+                        assert skip_dep_check is True
+                        instrumented_calls.append(ep_name)
+
+                return _Instrumentor
+
+        stubs = [_StubEntryPoint("fastapi"), _StubEntryPoint("aws-lambda"), _StubEntryPoint("botocore")]
+        monkeypatch.setattr(_instrumentation, "entry_points", lambda **_kwargs: stubs)
+
+        monkeypatch.setenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "fastapi")
+        assert instrument_installed_libraries(skip=frozenset({"aws-lambda"})) == ["botocore"]
+        assert instrumented_calls == ["botocore"]
+
+        instrumented_calls.clear()
+        monkeypatch.setenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "*")
+        assert instrument_installed_libraries() == []
+        assert instrumented_calls == []
+
+    def test_skips_entry_point_when_distribution_has_dependency_conflict(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        conflict_dist = object()
+        clean_dist = object()
+
+        class _StubEntryPoint:
+            def __init__(self, name: str, dist: object) -> None:
+                self.name = name
+                self.dist = dist
+
+            def load(self) -> object:
+                class _Instrumentor:
+                    is_instrumented_by_opentelemetry = False
+
+                    def instrument(self, *, skip_dep_check: bool = False) -> None:
+                        pass
+
+                return _Instrumentor
+
+        monkeypatch.delenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", raising=False)
+        monkeypatch.setattr(
+            _instrumentation,
+            "entry_points",
+            lambda **_kwargs: [
+                _StubEntryPoint("conflicting", conflict_dist),
+                _StubEntryPoint("compatible", clean_dist),
+            ],
+        )
+        monkeypatch.setattr(
+            _instrumentation,
+            "get_dist_dependency_conflicts",
+            lambda dist: "version mismatch" if dist is conflict_dist else None,
+        )
+
+        assert instrument_installed_libraries() == ["compatible"]
+
+    def test_logs_stderr_warning_and_continues_when_instrumentor_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        class _BrokenEntryPoint:
+            name = "broken-lib"
+            dist = None
+
+            @staticmethod
+            def load() -> object:
+                class _BrokenInstrumentor:
+                    is_instrumented_by_opentelemetry = True
+
+                    def instrument(self, *, skip_dep_check: bool = False) -> None:
+                        pass
+
+                    def uninstrument(self) -> None:
+                        msg = "uninstrument exploded"
+                        raise RuntimeError(msg)
+
+                def _factory() -> _BrokenInstrumentor:
+                    msg = "broken hook"
+                    raise RuntimeError(msg)
+
+                return _factory
+
+        class _MissingTargetEntryPoint:
+            name = "optional-lib"
+            dist = None
+
+            @staticmethod
+            def load() -> object:
+                msg = "optional_lib"
+                raise ModuleNotFoundError(msg)
+
+        class _HealthyEntryPoint:
+            name = "healthy-lib"
+            dist = None
+
+            @staticmethod
+            def load() -> object:
+                class _HealthyInstrumentor:
+                    is_instrumented_by_opentelemetry = True
+
+                    def uninstrument(self) -> None:
+                        msg = "teardown error"
+                        raise RuntimeError(msg)
+
+                return _HealthyInstrumentor
+
+        monkeypatch.delenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", raising=False)
+        monkeypatch.setattr(
+            _instrumentation,
+            "entry_points",
+            lambda **_kwargs: [_BrokenEntryPoint(), _MissingTargetEntryPoint(), _HealthyEntryPoint()],
+        )
+
+        assert instrument_installed_libraries() == ["healthy-lib"]
+        err = capsys.readouterr().err
+        assert "failed to instrument 'broken-lib' (RuntimeError); skipping." in err
+        assert "optional-lib" not in err
+
+        uninstrument_installed_libraries()
 
 
 class TestSdkInternals:

@@ -10,7 +10,7 @@ import sys
 
 import pytest
 from opentelemetry._logs import LogRecord
-from opentelemetry.sdk._logs import ReadWriteLogRecord
+from opentelemetry.sdk._logs import LogRecordLimits, ReadWriteLogRecord
 
 from i_dot_ai_utilities.otel import I_AI_NAMESPACE, iai_attribute, validate_attributes
 from i_dot_ai_utilities.otel._attributes import (
@@ -124,6 +124,32 @@ class TestAttributeNamespaceProcessor:
         processor = AttributeNamespaceProcessor()
         with pytest.raises(ValueError, match="application"):
             self._emit(processor, {"application": "x"})
+
+    def test_strict_mode_rewrites_lambda_aws_request_id_before_validating(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``awslambdaric`` injects ``aws_request_id`` automatically, so strict mode must map it before checking."""
+        monkeypatch.setenv(ENV_STRICT_ATTRIBUTES, "true")
+        processor = AttributeNamespaceProcessor()
+        result = self._emit(processor, {"aws_request_id": "req-42", "i_ai.auth.application": "casework"})
+        assert result == {"faas.invocation_id": "req-42", "i_ai.auth.application": "casework"}
+
+    def test_deletes_invalid_key_before_renaming_so_bounded_attributes_do_not_evict_valid_keys(self) -> None:
+        """``BoundedAttributes`` evicts the oldest entry on insert when full; deleting first preserves valid keys."""
+        limits = LogRecordLimits(max_attributes=2)
+        record = ReadWriteLogRecord(
+            LogRecord(body="m", attributes={"code.line.number": 10, "bad_key": "v"}),
+            limits=limits,
+        )
+        processor = AttributeNamespaceProcessor()
+        processor.on_emit(record)
+        assert dict(record.log_record.attributes or {}) == {
+            "code.line.number": 10,
+            "i_ai.unnamespaced.bad_key": "v",
+        }
+        assert processor.force_flush() is True
+        processor.shutdown()
 
     def test_strict_mode_raises_end_to_end_even_when_otlp_export_is_disabled(self) -> None:
         """Consumer test suites disable OTLP export and rely on strict mode to catch bad attribute names in CI."""

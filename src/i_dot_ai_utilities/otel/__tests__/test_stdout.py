@@ -8,14 +8,17 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
+
+from opentelemetry.sdk.trace import TracerProvider
 
 from i_dot_ai_utilities.otel._environment import (
     ENV_KEEP_STDOUT_LOGS,
     ENV_KEEP_STDOUT_LOGS_LAMBDA,
     keep_stdout_logs,
 )
-from i_dot_ai_utilities.otel._stdout import JsonLineFormatter
+from i_dot_ai_utilities.otel._stdout import JsonLineFormatter, JsonStdoutHandler, install_stdout_handler
 
 if TYPE_CHECKING:
     import pytest
@@ -37,6 +40,10 @@ class TestStdoutEnvPrecedence:
 
         monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "true")
         assert keep_stdout_logs() is True
+
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS_LAMBDA, "true")
+        monkeypatch.setenv(ENV_KEEP_STDOUT_LOGS, "false")
+        assert keep_stdout_logs() is False
 
 
 class TestJsonLineFormatter:
@@ -70,6 +77,68 @@ class TestJsonLineFormatter:
         assert "ValueError: boom" in payload["exception"]
         assert "msg" not in payload
         assert "args" not in payload
+
+    def test_includes_hex_trace_and_span_ids_only_inside_active_span(self) -> None:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(JsonLineFormatter())
+        test_logger = logging.getLogger("test.json.span")
+        test_logger.setLevel(logging.INFO)
+        test_logger.propagate = False
+        test_logger.addHandler(handler)
+        tracer = TracerProvider().get_tracer("test.json.span")
+        try:
+            test_logger.info("outside-span")
+            with tracer.start_as_current_span("work") as span:
+                expected_tid = format(span.get_span_context().trace_id, "032x")
+                expected_sid = format(span.get_span_context().span_id, "016x")
+                test_logger.info("inside-span")
+        finally:
+            test_logger.removeHandler(handler)
+
+        outside_line, inside_line = stream.getvalue().splitlines()
+        outside = json.loads(outside_line)
+        inside = json.loads(inside_line)
+        assert "trace_id" not in outside
+        assert "span_id" not in outside
+        assert inside["trace_id"] == expected_tid
+        assert inside["span_id"] == expected_sid
+
+    def test_serialises_non_json_extra_values_with_str_fallback(self) -> None:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(JsonLineFormatter())
+        test_logger = logging.getLogger("test.json.str")
+        test_logger.setLevel(logging.INFO)
+        test_logger.propagate = False
+        test_logger.addHandler(handler)
+        try:
+            test_logger.info("path-check", extra={"i_ai.sample.file.path": PurePosixPath("/var/log/app")})
+        finally:
+            test_logger.removeHandler(handler)
+
+        payload = json.loads(stream.getvalue().strip())
+        assert payload["i_ai.sample.file.path"] == "/var/log/app"
+
+
+class TestInstallStdoutHandler:
+    """``install_stdout_handler`` leaves existing application console handlers untouched to avoid duplicate output."""
+
+    def test_skips_json_stdout_handler_when_root_logger_already_has_application_handler(self) -> None:
+        root = logging.getLogger()
+        saved_handlers = list(root.handlers)
+        app_handler = logging.StreamHandler(io.StringIO())
+        try:
+            root.handlers = [app_handler]
+            assert install_stdout_handler() is None
+            assert root.handlers == [app_handler]
+
+            root.handlers = []
+            added = install_stdout_handler()
+            assert isinstance(added, JsonStdoutHandler)
+            assert root.handlers == [added]
+        finally:
+            root.handlers = saved_handlers
 
 
 class TestLocalStdoutFallback:
