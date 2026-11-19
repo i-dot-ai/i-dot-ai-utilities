@@ -8,13 +8,64 @@ import logging
 from typing import TYPE_CHECKING
 
 import pytest
+from opentelemetry.sdk._logs.export import LogRecordExporter, LogRecordExportResult
 
 from i_dot_ai_utilities.otel import _attributes, _configuration
 from i_dot_ai_utilities.otel._instrumentation import uninstrument_installed_libraries
 from i_dot_ai_utilities.otel._lambda import reset_inflight_flush
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
+
+    from opentelemetry.sdk._logs import ReadableLogRecord
+
+
+class FakeClock:
+    """Deterministic monotonic clock for circuit-breaker unit tests."""
+
+    def __init__(self, now: float = 100.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class ControllableLogExporter(LogRecordExporter):
+    """In-memory ``LogRecordExporter`` whose return status and exceptions can be scripted per test."""
+
+    def __init__(
+        self,
+        *,
+        result: LogRecordExportResult = LogRecordExportResult.SUCCESS,
+        raise_on_export: bool = False,
+        flush_result: bool = True,
+        raise_on_flush: bool = False,
+    ) -> None:
+        self.result = result
+        self.raise_on_export = raise_on_export
+        self.flush_result = flush_result
+        self.raise_on_flush = raise_on_flush
+        self.batches: list[list[ReadableLogRecord]] = []
+        self.shutdown_called = False
+
+    def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+        self.batches.append(list(batch))
+        if self.raise_on_export:
+            msg = "network down"
+            raise RuntimeError(msg)
+        return self.result
+
+    def force_flush(self, _timeout_millis: int = 30000) -> bool:
+        if self.raise_on_flush:
+            msg = "flush failed"
+            raise RuntimeError(msg)
+        return self.flush_result
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
 
 
 def reset_otel_state() -> None:

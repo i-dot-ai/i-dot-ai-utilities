@@ -18,7 +18,7 @@ Every runtime needs the `otel_native` base extra. Add one extra per framework or
 pip install --pre "i-dot-ai-utilities[otel_native_fastapi]"
 ```
 
-The extras pin the OpenTelemetry SDK to one minor version (currently 1.45), because this package relies on a few SDK internals. Tests in `__tests__/test_unit_runtime.py` (`TestSdkInternals`) fail if an upgrade removes one.
+The extras pin the OpenTelemetry SDK to one minor version (currently 1.45), because this package relies on a few SDK internals. Tests in `__tests__/test_configuration.py` (`TestSdkInternals`) fail if an upgrade removes one.
 
 ## Runtimes
 

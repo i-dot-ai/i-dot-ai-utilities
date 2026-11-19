@@ -1,4 +1,12 @@
-"""Subprocess runner for isolated Lambda and local OTel scenarios."""
+"""Subprocess runner for isolated AWS Lambda end-to-end scenarios.
+
+Environment variables accepted from tests:
+
+- ``TEST_EXPLICIT_SERVICE_NAME``: passed as ``configure_otel(service_name=...)`` in ``sample_lambda_handler``.
+- ``TEST_CALL_CONFIGURE_TWICE``: calls ``configure_otel()`` a second time when ``"1"`` to verify idempotency.
+- ``TEST_INSTALL_USER_HANDLER``: adds a non-``awslambdaric`` ``StreamHandler`` on the root logger before start-up.
+- ``TEST_SLOW_DNS_SECONDS``: delays ``socket.getaddrinfo`` to simulate stalled DNS resolution.
+"""
 
 from __future__ import annotations
 
@@ -104,7 +112,6 @@ def main() -> int:
         "results": results,
         "runtime_handler_output": runtime_buf.getvalue(),
         "user_handler_output": user_buf.getvalue(),
-        "structlog_imported": "structlog" in sys.modules,
     }
     sys.stderr.write("SCENARIO_JSON:" + json.dumps(summary) + "\n")
     sys.stderr.flush()

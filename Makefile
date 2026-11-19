@@ -46,6 +46,7 @@ test-logging:
 # Run the native OpenTelemetry module's tests only.
 test-otel:
 	uv run pytest \
+		-v \
 		src/i_dot_ai_utilities/otel \
 		--cov-config=.coveragerc \
 		--cov src/i_dot_ai_utilities/otel \

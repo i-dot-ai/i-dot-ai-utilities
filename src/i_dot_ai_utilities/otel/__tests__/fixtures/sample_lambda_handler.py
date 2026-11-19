@@ -1,4 +1,4 @@
-"""Sample Lambda handler module for no-layer OTel instrumentation spike and tests."""
+"""Sample Lambda handler module invoked inside subprocess integration scenarios."""
 
 from __future__ import annotations
 
@@ -24,14 +24,17 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     span = trace.get_current_span()
     span_ctx = span.get_span_context()
 
-    # Emit an internal opentelemetry.* log to prove the filter blocks it from OTLP.
-    logging.getLogger("opentelemetry.sdk.internal_test").warning("internal-otel-noise")
+    if event.get("emit_internal_otel_log"):
+        logging.getLogger("opentelemetry.sdk.internal_test").warning("internal-otel-noise")
+
+    extra: dict[str, Any] = {iai_attribute("auth.application"): event.get("application", "demo-app")}
+    if isinstance(event.get("extra_attributes"), dict):
+        extra.update(event["extra_attributes"])
 
     logger.info(
         "Authorisation request started for %s",
         event.get("application", "demo-app"),
-        # ``mode`` is deliberately not namespaced, to prove it is exported as ``i_ai.unnamespaced.mode``.
-        extra={iai_attribute("auth.application"): event.get("application", "demo-app"), "mode": mode},
+        extra=extra,
     )
 
     if mode == "caught_error":
