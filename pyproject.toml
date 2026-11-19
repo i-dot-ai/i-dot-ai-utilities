@@ -128,11 +128,17 @@ otel_native = [
     "wrapt>=1.14,<3",
 ]
 
-# Native OpenTelemetry for AWS Lambda - adds AWS Lambda and botocore
+# Native OpenTelemetry for AWS Lambda - adds AWS Lambda handler
 # auto-instrumentation without pulling Lambda dependencies into container extras.
 otel_native_lambda = [
     "i-dot-ai-utilities[otel_native]",
     "opentelemetry-instrumentation-aws-lambda>=0.66b1,<0.67",
+]
+
+# Native OpenTelemetry for AWS SDK calls - adds botocore/boto3 auto-instrumentation
+# only for services and Lambdas that call AWS APIs.
+otel_native_botocore = [
+    "i-dot-ai-utilities[otel_native]",
     "opentelemetry-instrumentation-botocore>=0.66b1,<0.67",
 ]
 
@@ -160,7 +166,7 @@ all = [
     "grpcio-status>=1.76.0",
     "django>=4.2,<6.0",
     # Reuse the native extras so `all` keeps their OpenTelemetry version caps.
-    "i-dot-ai-utilities[otel_native_lambda,otel_native_fastapi]",
+    "i-dot-ai-utilities[otel_native_lambda,otel_native_botocore,otel_native_fastapi]",
     "opentelemetry-instrumentation-django>=0.66b1,<0.67",
 ]
 

@@ -14,6 +14,7 @@ from opentelemetry.sdk._logs import LogRecordLimits, ReadWriteLogRecord
 
 from i_dot_ai_utilities.otel import I_AI_NAMESPACE, iai_attribute, validate_attributes
 from i_dot_ai_utilities.otel._attributes import (
+    _SDK_LOG_ATTRIBUTES,
     ENV_STRICT_ATTRIBUTES,
     AttributeNamespaceProcessor,
     _semconv_registry,
@@ -85,6 +86,7 @@ class TestAttributeHelpers:
                 imported |= {v for k, v in vars(module).items() if k.isupper() and isinstance(v, str)}
         names, templates = _semconv_registry()
         assert len(names) > 500
+        assert names >= _SDK_LOG_ATTRIBUTES
         assert names | {t.removesuffix(".") for t in templates} == imported
 
 

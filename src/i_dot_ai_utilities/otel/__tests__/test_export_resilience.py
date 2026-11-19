@@ -7,8 +7,10 @@ import logging
 import warnings
 from typing import TYPE_CHECKING
 
-from opentelemetry.context import Context
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry._logs import LogRecord
+from opentelemetry.context import Context, get_value
+from opentelemetry.instrumentation.utils import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler, ReadWriteLogRecord
 from opentelemetry.sdk._logs.export import (
     InMemoryLogRecordExporter,
     LogRecordExportResult,
@@ -19,7 +21,10 @@ from i_dot_ai_utilities.otel import _emf
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import pytest
+    from opentelemetry.sdk._logs import ReadableLogRecord
 from i_dot_ai_utilities.otel._emf import (
     EMF_EVENT_NAME,
     EMF_METRIC_NAME,
@@ -29,8 +34,7 @@ from i_dot_ai_utilities.otel._emf import (
 from i_dot_ai_utilities.otel._export import (
     ExportCircuitBreaker,
     FailureReportingExporter,
-    TrackedBatchLogRecordProcessor,
-    TrackedLogRecordExporter,
+    LambdaLogRecordProcessor,
 )
 from i_dot_ai_utilities.otel._lambda import emit_lambda_export_failure, flush_lambda_logs
 
@@ -62,40 +66,58 @@ class TestExportCircuitBreaker:
         assert not breaker.is_open()
 
 
-class TestTrackedExporterAndBatchProcessor:
-    """Tracked Lambda export records failures on the breaker and caps each outage flush to a single attempt."""
+class TestLambdaLogRecordProcessor:
+    """Bounded deque Lambda processor suppresses self-instrumentation, tracks failures, and caps outage flushes."""
 
-    def test_records_failed_status_and_raised_exceptions_on_circuit_breaker(self) -> None:
-        clock = FakeClock()
-        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
-        delegate = ControllableLogExporter(result=LogRecordExportResult.FAILURE)
-        tracked = TrackedLogRecordExporter(delegate, breaker)
-
-        assert tracked.export([]) is LogRecordExportResult.FAILURE
-        assert breaker.is_open()
-        assert tracked.consume_failure() is True
-        assert tracked.consume_failure() is False
-
-        breaker.record_success()
-        delegate.raise_on_export = True
-        assert tracked.export([]) is LogRecordExportResult.FAILURE
-        assert breaker.is_open()
-        assert tracked.consume_failure() is True
-        assert tracked.force_flush() is True
-        tracked.shutdown()
-        assert delegate.shutdown_called is True
-
-    def test_buffers_records_in_fifo_order_preserving_trace_ids_while_breaker_is_open_and_flushes_after_cooldown(
+    def test_records_failed_status_and_raised_exceptions_and_suppresses_instrumentation(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Open-breaker records clear ``Context()`` to avoid pinning spans in memory while keeping hex IDs and order."""
-        monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "60000")
+        monkeypatch.setenv("OTEL_BLRP_MAX_QUEUE_SIZE", "not-an-int")
+        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "0")
+        suppression_flags: list[bool] = []
+
+        class _CheckingExporter(ControllableLogExporter):
+            def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+                suppression_flags.append(bool(get_value(_SUPPRESS_INSTRUMENTATION_KEY)))
+                return super().export(batch)
+
+        clock = FakeClock()
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
+        delegate = _CheckingExporter(result=LogRecordExportResult.FAILURE)
+        processor = LambdaLogRecordProcessor(delegate, breaker)
+
+        processor.on_emit(ReadWriteLogRecord(LogRecord(body="m1")))
+        assert processor.has_pending is True
+        assert processor.force_flush() is False
+        assert suppression_flags == [True]
+        assert breaker.is_open()
+        assert processor.consume_export_failure() is True
+        assert processor.consume_export_failure() is False
+
+        breaker.record_success()
+        delegate.raise_on_export = True
+        processor.on_emit(ReadWriteLogRecord(LogRecord(body="m2")))
+        assert processor.force_flush() is False
+        assert breaker.is_open()
+        assert processor.consume_export_failure() is True
+
+        processor.shutdown()
+        processor.shutdown()  # idempotent
+        assert delegate.shutdown_called is True
+        processor.on_emit(ReadWriteLogRecord(LogRecord(body="ignored-after-shutdown")))
+        assert processor.has_pending is False
+        assert processor.force_flush() is False
+
+    def test_buffers_records_in_fifo_order_preserving_trace_ids_while_breaker_is_open_and_flushes_after_cooldown(
+        self,
+    ) -> None:
+        """Buffered records clear ``Context()`` to avoid pinning spans in memory while keeping hex IDs and order."""
         tracer = TracerProvider().get_tracer("test.breaker.fifo")
         clock = FakeClock()
         breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
         delegate = ControllableLogExporter(result=LogRecordExportResult.SUCCESS)
-        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        processor = LambdaLogRecordProcessor(delegate, breaker)
         provider = LoggerProvider()
         provider.add_log_record_processor(processor)
 
@@ -116,7 +138,7 @@ class TestTrackedExporterAndBatchProcessor:
                 test_logger.info("msg-2")
 
             assert delegate.batches == []
-            assert processor._queue is not None  # noqa: SLF001
+            assert processor.force_flush() is False
             assert all(rec.log_record.context == Context() for rec in processor._queue)  # noqa: SLF001
 
             clock.advance(30.1)
@@ -130,17 +152,16 @@ class TestTrackedExporterAndBatchProcessor:
             test_logger.removeHandler(handler)
             processor.shutdown()
 
-    def test_open_breaker_drops_oldest_records_when_bounded_queue_fills(
+    def test_drops_oldest_records_when_bounded_queue_fills(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OTEL_BLRP_MAX_QUEUE_SIZE", "2")
-        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "2")
-        monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "60000")
+        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "5")
         clock = FakeClock()
         breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
         delegate = ControllableLogExporter(result=LogRecordExportResult.SUCCESS)
-        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        processor = LambdaLogRecordProcessor(delegate, breaker)
         provider = LoggerProvider()
         provider.add_log_record_processor(processor)
 
@@ -171,11 +192,9 @@ class TestTrackedExporterAndBatchProcessor:
     ) -> None:
         """Once one batch fails, remaining queued batches fail immediately instead of multiplying timeouts."""
         monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "2")
-        monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "60000")
         breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
         delegate = ControllableLogExporter(result=LogRecordExportResult.FAILURE)
-        tracked_exporter = TrackedLogRecordExporter(delegate, breaker)
-        processor = TrackedBatchLogRecordProcessor(tracked_exporter)
+        processor = LambdaLogRecordProcessor(delegate, breaker)
         provider = LoggerProvider()
         provider.add_log_record_processor(processor)
 
@@ -189,11 +208,8 @@ class TestTrackedExporterAndBatchProcessor:
         test_logger.addHandler(handler)
         failures: list[str] = []
         try:
-            # Queue 3 batches of 2 records while the breaker is open, then attempt one invocation flush.
-            breaker.record_failure()
             for idx in range(6):
                 test_logger.info("record-%d", idx)
-            breaker.record_success()
 
             flushed = flush_lambda_logs(
                 None,

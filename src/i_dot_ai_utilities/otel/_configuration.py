@@ -28,21 +28,15 @@ from opentelemetry.sdk._configuration import _overwrite_logging_config_fns
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk.resources import OTELResourceDetector
 
-from i_dot_ai_utilities.otel._attributes import AttributeNamespaceProcessor
-from i_dot_ai_utilities.otel._ecs import EcsRuntime, is_container_runtime
-from i_dot_ai_utilities.otel._environment import has_otlp_logs_endpoint
+from i_dot_ai_utilities.otel._attributes import AttributeNamespaceProcessor, warm_semconv_registry
+from i_dot_ai_utilities.otel._environment import has_otlp_logs_endpoint, is_container_runtime
 from i_dot_ai_utilities.otel._instrumentation import instrument_installed_libraries
-from i_dot_ai_utilities.otel._lambda import LambdaRuntime
-from i_dot_ai_utilities.otel._runtime import LocalRuntime, Runtime, RuntimeName
+from i_dot_ai_utilities.otel._runtime import Runtime, RuntimeName
 
 if TYPE_CHECKING:
     from opentelemetry.util.types import AttributeValue
 
-_RUNTIMES: dict[RuntimeName, type[Runtime]] = {
-    "lambda": LambdaRuntime,
-    "ecs": EcsRuntime,
-    "local": LocalRuntime,
-}
+_VALID_RUNTIMES: frozenset[RuntimeName] = frozenset({"lambda", "ecs", "local"})
 
 _INTERNAL_OTEL_LOGGER_PREFIX = "opentelemetry"
 _NOISY_LIBRARY_LOGGERS = ("botocore", "boto3", "urllib3")
@@ -89,8 +83,8 @@ def detect_runtime(runtime: RuntimeName | None = None) -> RuntimeName:
         ValueError: If `runtime` is not a supported runtime name.
     """
     if runtime is not None:
-        if runtime not in _RUNTIMES:
-            msg = f"Unsupported runtime {runtime!r}; expected one of {sorted(_RUNTIMES)}."
+        if runtime not in _VALID_RUNTIMES:
+            msg = f"Unsupported runtime {runtime!r}; expected one of {sorted(_VALID_RUNTIMES)}."
             raise ValueError(msg)
         return runtime
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip():
@@ -98,6 +92,21 @@ def detect_runtime(runtime: RuntimeName | None = None) -> RuntimeName:
     if is_container_runtime():
         return "ecs"
     return "local"
+
+
+def _load_runtime_class(runtime: RuntimeName) -> type[Runtime]:
+    """Import only the active runtime class so unused AWS resource detectors and wrappers stay unloaded."""
+    if runtime == "lambda":
+        from i_dot_ai_utilities.otel._lambda import LambdaRuntime  # noqa: PLC0415
+
+        return LambdaRuntime
+    if runtime == "ecs":
+        from i_dot_ai_utilities.otel._ecs import EcsRuntime  # noqa: PLC0415
+
+        return EcsRuntime
+    from i_dot_ai_utilities.otel._runtime import LocalRuntime  # noqa: PLC0415
+
+    return LocalRuntime
 
 
 def _warn_once(key: str, message: str) -> None:
@@ -240,7 +249,7 @@ def configure_otel(
         _state.runtime.on_reconfigure()
         return _state.logger_provider
 
-    active = _RUNTIMES[resolved_runtime](service_name=_resolve_service_name(service_name))
+    active = _load_runtime_class(resolved_runtime)(service_name=_resolve_service_name(service_name))
     endpoint_configured = has_otlp_logs_endpoint()
     if not endpoint_configured:
         _warn_once("endpoint", active.missing_endpoint_message)
@@ -257,6 +266,7 @@ def configure_otel(
     propagate.set_global_textmap(propagate._load_propagators())  # noqa: SLF001
 
     _configure_sdk(active)
+    warm_semconv_registry()
 
     provider = cast("LoggerProvider", get_logger_provider())
     _state.root_logging_handler = _install_root_handler(provider)

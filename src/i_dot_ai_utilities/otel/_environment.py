@@ -14,6 +14,13 @@ ENV_KEEP_STDOUT_LOGS_LAMBDA: Final[str] = "I_DOT_AI_OTEL_LAMBDA_KEEP_STDOUT_LOGS
 _TRUTHY: Final[frozenset[str]] = frozenset({"1", "true", "yes"})
 
 
+def is_container_runtime() -> bool:
+    """Return `True` when `ECS_CONTAINER_METADATA_URI_V4` or `AWS_BATCH_JOB_ID` is set."""
+    return bool(
+        os.environ.get("ECS_CONTAINER_METADATA_URI_V4", "").strip() or os.environ.get("AWS_BATCH_JOB_ID", "").strip()
+    )
+
+
 def has_otlp_logs_endpoint() -> bool:
     """Return `True` when `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty."""
     return bool(
@@ -68,6 +75,7 @@ __all__ = [
     "env_flag",
     "env_number",
     "has_otlp_logs_endpoint",
+    "is_container_runtime",
     "keep_stdout_logs",
     "logs_export_disabled",
 ]

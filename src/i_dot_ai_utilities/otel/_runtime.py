@@ -3,7 +3,7 @@
 Each runtime subclasses `Runtime` and overrides only the lifecycle steps that
 differ from the local baseline. `configure_otel` runs the same startup sequence
 against the active `Runtime` instance, so adding a runtime requires one
-subclass and one entry in `_configuration._RUNTIMES`.
+subclass and one branch in `_configuration._load_runtime_class`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ from opentelemetry.environment_variables import (
     OTEL_TRACES_EXPORTER,
 )
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_PROTOCOL
+from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_COMPRESSION,
+    OTEL_EXPORTER_OTLP_PROTOCOL,
+)
 
 from i_dot_ai_utilities.otel._environment import keep_stdout_logs, logs_export_disabled
 from i_dot_ai_utilities.otel._stdout import install_stdout_handler
@@ -34,12 +37,13 @@ RuntimeName = Literal["lambda", "ecs", "local"]
 
 
 def apply_common_env_defaults(*, logs_exporter: str) -> None:
-    """Set shared exporter and protocol defaults with `os.environ.setdefault` so caller variables win."""
+    """Set shared exporter, protocol, and compression defaults with `os.environ.setdefault` so caller variables win."""
     # Default traces and metrics exporters to "none" while otel-gateway runs a logs-only pipeline.
     os.environ.setdefault(OTEL_TRACES_EXPORTER, "none")
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "none")
     os.environ.setdefault(OTEL_LOGS_EXPORTER, logs_exporter)
     os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
+    os.environ.setdefault(OTEL_EXPORTER_OTLP_COMPRESSION, "gzip")
 
 
 def apply_aws_trace_env_defaults() -> None:

@@ -12,6 +12,8 @@ import types
 from typing import Any
 
 import pytest
+from opentelemetry._logs import LogRecord
+from opentelemetry.sdk._logs import ReadWriteLogRecord
 
 from i_dot_ai_utilities.otel import _lambda
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
@@ -22,8 +24,7 @@ from i_dot_ai_utilities.otel._export import (
     DEFAULT_CIRCUIT_BREAKER_SECONDS,
     ENV_CIRCUIT_BREAKER_SECONDS,
     ExportCircuitBreaker,
-    TrackedBatchLogRecordProcessor,
-    TrackedLogRecordExporter,
+    LambdaLogRecordProcessor,
     resolve_circuit_breaker_seconds,
 )
 from i_dot_ai_utilities.otel._instrumentation import uninstrument_installed_libraries
@@ -325,6 +326,28 @@ class TestLambdaStdoutHandlers:
 class TestLambdaFlushBudget:
     """Flushing yields to the handler response when the invocation is close to its Lambda timeout."""
 
+    def test_skips_thread_and_breaker_when_no_records_are_queued(self) -> None:
+        """Invocations that emit zero logs return immediately without spawning a flush thread or firing EMF."""
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+        breaker.record_failure()
+        delegate = ControllableLogExporter()
+        processor = LambdaLogRecordProcessor(delegate, breaker)
+        failures: list[str] = []
+        try:
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is True
+            )
+            assert failures == []
+            assert delegate.batches == []
+
+            processor.on_emit(ReadWriteLogRecord(LogRecord(body="queued")))
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is False
+            )
+            assert failures == ["breaker_open"]
+        finally:
+            processor.shutdown()
+
     def test_skips_flush_without_opening_breaker_when_remaining_time_below_timeout_plus_margin(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -334,8 +357,8 @@ class TestLambdaFlushBudget:
 
         breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
         delegate = ControllableLogExporter()
-        tracked_exporter = TrackedLogRecordExporter(delegate, breaker)
-        processor = TrackedBatchLogRecordProcessor(tracked_exporter)
+        processor = LambdaLogRecordProcessor(delegate, breaker)
+        processor.on_emit(ReadWriteLogRecord(LogRecord(body="pending")))
 
         class _LowTimeCtx:
             @staticmethod
@@ -351,6 +374,7 @@ class TestLambdaFlushBudget:
                 failure_emitter=failures.append,
             )
             assert flushed is False
+            assert processor.has_pending is True
             assert not breaker.is_open()
             assert failures == []
         finally:
@@ -364,7 +388,8 @@ class TestLambdaFlushBudget:
         assert flush_lambda_logs(None, processor=None, breaker=breaker) is True
 
         delegate = ControllableLogExporter()
-        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(delegate, breaker))
+        processor = LambdaLogRecordProcessor(delegate, breaker)
+        processor.on_emit(ReadWriteLogRecord(LogRecord(body="pending")))
         failures: list[str] = []
         try:
 
@@ -401,6 +426,7 @@ class TestLambdaFlushBudget:
             assert (
                 flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is True
             )
+            assert [rec.log_record.body for rec in delegate.batches[0]] == ["pending"]
         finally:
             processor.shutdown()
 
@@ -410,7 +436,8 @@ class TestLambdaFlushBudget:
     ) -> None:
         monkeypatch.setattr(_lambda, "get_logger_provider", object)
         breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
-        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(ControllableLogExporter(), breaker))
+        delegate = ControllableLogExporter()
+        processor = LambdaLogRecordProcessor(delegate, breaker)
 
         class _BrokenCtx:
             @staticmethod
@@ -424,8 +451,11 @@ class TestLambdaFlushBudget:
                 return "not-a-number"
 
         try:
+            processor.on_emit(ReadWriteLogRecord(LogRecord(body="first")))
             assert flush_lambda_logs(_BrokenCtx(), processor=processor, breaker=breaker) is True
+            processor.on_emit(ReadWriteLogRecord(LogRecord(body="second")))
             assert flush_lambda_logs(_StringTimeCtx(), processor=processor, breaker=breaker) is True
+            assert [[r.log_record.body for r in batch] for batch in delegate.batches] == [["first"], ["second"]]
         finally:
             processor.shutdown()
 
@@ -466,6 +496,7 @@ class TestLambdaEndToEnd:
 
             req = server.requests_for_path("/v1/logs")[0]
             assert req.headers.get("x-custom-test") == "iai-test"
+            assert req.headers.get("content-encoding") == "gzip"
             assert len(req.records) == 1
 
             record = req.records[0]

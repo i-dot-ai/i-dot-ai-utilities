@@ -12,7 +12,6 @@ import sys
 import pytest
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import (
-    BatchLogRecordProcessor,
     InMemoryLogRecordExporter,
     SimpleLogRecordProcessor,
 )
@@ -69,6 +68,9 @@ class TestPublicSurface:
             "validate_attributes",
         ]
         assert public_otel.configure_otel is configure_otel
+        assert callable(public_otel.flush_otel)
+        with pytest.raises(AttributeError, match="no_such_attr"):
+            _ = public_otel.no_such_attr  # type: ignore[attr-defined]
 
 
 class TestImportBoundaries:
@@ -141,6 +143,33 @@ class TestImportBoundaries:
         )
         proc = _run_python(script)
         assert "LAMBDA_IMPORT_ERROR_OK" in proc.stdout
+
+    def test_importing_iai_attribute_is_lazy_and_ecs_runtime_skips_lambda_module(self) -> None:
+        """Attribute helpers avoid loading runtime modules, and ``configure_otel`` loads only the active runtime."""
+        lazy_script = (
+            "import json, sys\n"
+            "from i_dot_ai_utilities.otel import iai_attribute\n"
+            "attr = iai_attribute('auth.decision.reason')\n"
+            "loaded = [m for m in ('_configuration', '_ecs', '_lambda', '_instrumentation')\n"
+            "          if f'i_dot_ai_utilities.otel.{m}' in sys.modules]\n"
+            "print(json.dumps({'attr': attr, 'loaded': loaded}))\n"
+        )
+        lazy_result = json.loads(_run_python(lazy_script).stdout.strip())
+        assert lazy_result == {"attr": "i_ai.auth.decision.reason", "loaded": []}
+
+        ecs_script = (
+            "import json, sys\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "configure_otel(service_name='ecs-svc', runtime='ecs')\n"
+            "print(json.dumps({\n"
+            "    'ecs_loaded': 'i_dot_ai_utilities.otel._ecs' in sys.modules,\n"
+            "    'lambda_loaded': 'i_dot_ai_utilities.otel._lambda' in sys.modules,\n"
+            "}))\n"
+        )
+        ecs_result = json.loads(
+            _run_python(ecs_script, env_overrides={"I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false"}).stdout.strip()
+        )
+        assert ecs_result == {"ecs_loaded": True, "lambda_loaded": False}
 
 
 class TestRuntimeDetection:
@@ -553,13 +582,6 @@ class TestAutoInstrumentation:
 
 class TestSdkInternals:
     """Fail loudly when an OpenTelemetry SDK upgrade removes a private attribute this package relies on."""
-
-    def test_batch_processor_exposes_bounded_deque_for_open_breaker_buffering(self) -> None:
-        processor = BatchLogRecordProcessor(InMemoryLogRecordExporter())
-        try:
-            assert hasattr(processor._batch_processor._queue, "appendleft")
-        finally:
-            processor.shutdown()
 
     def test_logger_provider_exposes_atexit_handler_for_replacement(self) -> None:
         provider = LoggerProvider()

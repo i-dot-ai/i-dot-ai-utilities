@@ -21,7 +21,6 @@ from opentelemetry._logs import get_logger_provider
 from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
     OTEL_BLRP_MAX_QUEUE_SIZE,
-    OTEL_BLRP_SCHEDULE_DELAY,
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_TIMEOUT,
 )
@@ -32,14 +31,13 @@ from i_dot_ai_utilities.otel._emf import emit_export_failure
 from i_dot_ai_utilities.otel._environment import env_number, keep_stdout_logs, logs_export_disabled
 from i_dot_ai_utilities.otel._export import (
     ExportCircuitBreaker,
-    TrackedBatchLogRecordProcessor,
-    TrackedLogRecordExporter,
+    LambdaLogRecordProcessor,
     resolve_circuit_breaker_seconds,
 )
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
@@ -50,9 +48,6 @@ DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
 DEFAULT_LAMBDA_MAX_QUEUE_SIZE: Final[str] = "2048"
-# Set the background worker interval to 60 seconds, above the 30-second default circuit-breaker
-# window, so records stay queued while the breaker is open and flush at invocation boundaries.
-DEFAULT_LAMBDA_SCHEDULE_DELAY_MILLIS: Final[str] = "60000"
 DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS: Final[str] = "2000"
 OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT: Final[str] = "OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT"
 
@@ -151,15 +146,15 @@ def _remaining_time_millis(context: Any) -> int | None:
     return None
 
 
-def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outcome: dict[str, bool]) -> None:
+def _run_flush(processors: Sequence[LambdaLogRecordProcessor], timeout_ms: int, outcome: dict[str, bool]) -> None:
     """Flush logs into `outcome["flushed"]`, catching all errors so a worker failure never crashes the thread."""
     try:
-        # Flush via provider.force_flush when available so every registered log processor flushes alongside processor.
+        # Flush via provider.force_flush when available so every registered log processor flushes alongside processors.
         provider = get_logger_provider()
         if hasattr(provider, "force_flush"):
             outcome["flushed"] = bool(provider.force_flush(timeout_ms))
         else:
-            outcome["flushed"] = processor.force_flush(timeout_ms)
+            outcome["flushed"] = all(processor.force_flush(timeout_ms) for processor in processors)
     except Exception:  # noqa: BLE001
         outcome["flushed"] = False
 
@@ -167,29 +162,31 @@ def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outco
 def flush_lambda_logs(  # noqa: PLR0911
     context: Any,
     *,
-    processor: TrackedBatchLogRecordProcessor | None,
+    processor: LambdaLogRecordProcessor | None = None,
+    processors: Sequence[LambdaLogRecordProcessor] = (),
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
     """Flush queued OTLP logs synchronously at the end of a Lambda invocation.
 
-    Skips the flush when `processor` is `None`, the circuit breaker is open, an
-    earlier timed-out flush thread is still alive, or the invocation has less
-    than the export timeout plus `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS`
-    remaining. Runs the flush on a daemon thread capped at the export timeout
-    so slow DNS resolution or a hung socket cannot hold the response longer.
+    Skips the flush immediately when no processor is configured or no records
+    are queued. Otherwise skips when the circuit breaker is open, an earlier
+    timed-out flush thread is still alive, or the invocation has less than the
+    export timeout plus `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` remaining. Runs
+    the flush on a daemon thread capped at the export timeout so slow DNS
+    resolution or a hung socket cannot hold the response longer.
 
-    When `force_flush` returns `False` without an exporter failure, such as a
-    queue-drain timeout inside `BatchLogRecordProcessor`, records a failure on
-    `breaker` directly because `TrackedLogRecordExporter` was never reached.
+    When `force_flush` returns `False` without an exporter failure, records a
+    failure on `breaker` directly so the outage window still opens.
 
     Returns:
-        `True` when no processor is configured or the flush succeeded, or
-        `False` when the flush was skipped or failed.
+        `True` when nothing needed flushing or the flush succeeded, or `False`
+        when the flush was skipped or failed.
     """
     global _inflight_flush  # noqa: PLW0603
 
-    if processor is None:
+    active_processors = list(processors) if processors else ([processor] if processor is not None else [])
+    if not active_processors or not any(proc.has_pending for proc in active_processors):
         return True
 
     if breaker.is_open():
@@ -207,12 +204,12 @@ def flush_lambda_logs(  # noqa: PLR0911
     if remaining_ms is not None and remaining_ms < (timeout_ms + margin_ms):
         return False
 
-    exporter = processor.exporter
-    exporter.reset_window()
+    for proc in active_processors:
+        proc.reset_export_window()
     outcome: dict[str, bool] = {}
     worker = threading.Thread(
         target=_run_flush,
-        args=(processor, timeout_ms, outcome),
+        args=(active_processors, timeout_ms, outcome),
         name="i-dot-ai-otel-flush",
         daemon=True,
     )
@@ -226,7 +223,7 @@ def flush_lambda_logs(  # noqa: PLR0911
         return False
 
     flushed = outcome.get("flushed", False)
-    exporter_failed = exporter.consume_failure()
+    exporter_failed = any(proc.consume_export_failure() for proc in active_processors)
     if not flushed or exporter_failed:
         if not exporter_failed:
             breaker.record_failure()
@@ -259,7 +256,8 @@ def resolve_lambda_handler_target() -> tuple[str, str] | None:
 
 def instrument_lambda_handler(
     *,
-    processor: TrackedBatchLogRecordProcessor | None,
+    processor: LambdaLogRecordProcessor | None = None,
+    processors: Sequence[LambdaLogRecordProcessor] = (),
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
@@ -329,6 +327,7 @@ def instrument_lambda_handler(
             flush_lambda_logs(
                 context,
                 processor=processor,
+                processors=processors,
                 breaker=breaker,
                 failure_emitter=failure_emitter,
             )
@@ -359,7 +358,7 @@ class LambdaRuntime(Runtime):
     def __init__(self, *, service_name: str | None) -> None:
         super().__init__(service_name=service_name)
         self.breaker = ExportCircuitBreaker(open_seconds=resolve_circuit_breaker_seconds())
-        self.processor: TrackedBatchLogRecordProcessor | None = None
+        self.processors: list[LambdaLogRecordProcessor] = []
 
     def apply_env_defaults(self, *, can_export: bool) -> None:
         super().apply_env_defaults(can_export=can_export)
@@ -370,7 +369,6 @@ class LambdaRuntime(Runtime):
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
         os.environ.setdefault(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE)
         os.environ.setdefault(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_MAX_QUEUE_SIZE)
-        os.environ.setdefault(OTEL_BLRP_SCHEDULE_DELAY, DEFAULT_LAMBDA_SCHEDULE_DELAY_MILLIS)
         os.environ.setdefault(
             OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT,
             DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS,
@@ -380,9 +378,8 @@ class LambdaRuntime(Runtime):
         return dict(AwsLambdaResourceDetector().detect().attributes)
 
     def log_record_processor(self, exporter: LogRecordExporter) -> LogRecordProcessor:
-        processor = TrackedBatchLogRecordProcessor(TrackedLogRecordExporter(exporter, self.breaker))
-        if self.processor is None:
-            self.processor = processor
+        processor = LambdaLogRecordProcessor(exporter, self.breaker)
+        self.processors.append(processor)
         return processor
 
     def post_configure(self, provider: LoggerProvider) -> None:
@@ -394,7 +391,7 @@ class LambdaRuntime(Runtime):
     def on_reconfigure(self) -> None:
         # Retry handler wrapping if an earlier configure_otel() call ran before the handler existed.
         # Remove awslambdaric stdout handlers only after wrapping succeeds so logs are never dropped.
-        if instrument_lambda_handler(processor=self.processor, breaker=self.breaker):
+        if instrument_lambda_handler(processors=self.processors, breaker=self.breaker):
             remove_lambda_runtime_stdout_handlers()
 
 

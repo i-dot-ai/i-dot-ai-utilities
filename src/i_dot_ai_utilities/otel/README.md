@@ -11,14 +11,15 @@ Every runtime needs the `otel_native` base extra. Add one extra per framework or
 | Extra | Adds | Use for |
 |---|---|---|
 | `otel_native` | SDK, OTLP/HTTP exporter, AWS resource detectors, X-Ray propagator | ECS, AWS Batch and local runs with no framework |
-| `otel_native_lambda` | AWS Lambda and botocore instrumentation | Python Lambdas |
+| `otel_native_lambda` | AWS Lambda instrumentation | Python Lambdas |
+| `otel_native_botocore` | botocore and boto3 instrumentation | Services and Lambdas that call AWS APIs |
 | `otel_native_fastapi` | FastAPI instrumentation | FastAPI services |
 
 ```bash
 pip install --pre "i-dot-ai-utilities[otel_native_fastapi]"
 ```
 
-The extras pin the OpenTelemetry SDK to one minor version (currently 1.45), because this package relies on a few SDK internals. Tests in `__tests__/test_configuration.py` (`TestSdkInternals`) fail if an upgrade removes one.
+The extras pin the OpenTelemetry SDK to one minor version (currently 1.45), because capped shutdown relies on an SDK internal attribute. Tests in `__tests__/test_configuration.py` (`TestSdkInternals`) fail if an upgrade removes it.
 
 ## Runtimes
 
@@ -240,6 +241,8 @@ The environment wins because the gateway's `filter/service_allowlist` processor 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(from Terraform SSM)_ | Base OTLP/HTTP URL, for example `https://otel-gateway.dev.i.ai.gov.uk:4318`; the SDK appends `/v1/logs` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | _(unset)_ | Logs-specific override, used verbatim |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport. `http/protobuf` is the only supported value |
+| `OTEL_EXPORTER_OTLP_COMPRESSION` | `gzip` | OTLP request body compression (`gzip`, `deflate` or `none`) |
+| `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` | _(unset)_ | Logs-specific compression override |
 | `OTEL_EXPORTER_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers |
 | `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_ | Extra resource attributes, for example `service.namespace=casework` |
 | `ENVIRONMENT` | _(set by the service)_ | Default for `deployment.environment.name` |
@@ -274,7 +277,6 @@ On `lambda` and `ecs`, `OTEL_PYTHON_ID_GENERATOR` defaults to `xray` and `OTEL_P
 | `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` | `2` (not set if `OTEL_EXPORTER_OTLP_TIMEOUT` is set) | Per-batch export timeout in seconds (the Python SDK reads this in seconds, so `2` is 2 seconds, not 2 milliseconds) |
 | `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `512` | Records per OTLP POST, so a normal invocation exports in one batch |
 | `OTEL_BLRP_MAX_QUEUE_SIZE` | `2048` | Records buffered across invocations |
-| `OTEL_BLRP_SCHEDULE_DELAY` | `60000` | Background export interval; flushing happens at invocation boundaries instead |
 | `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` | `250` | Remaining-time buffer required on top of the export timeout before flushing |
 | `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS` | `30` | Seconds to skip synchronous flushes after a failure |
 
@@ -332,14 +334,15 @@ The ECS Terraform module needs two follow-up changes for this to hold in product
 
 ### Lambda
 
-Lambda freezes the process when the handler returns, so the background thread cannot be relied on. The outer handler wrapper flushes inside `finally` on every invocation (normal return, handled error or unhandled exception), after the Lambda instrumentor closes the invocation span:
+Lambda freezes the process when the handler returns, so `LambdaRuntime` buffers records in a bounded in-memory queue with no background export thread. The outer handler wrapper flushes inside `finally` on every invocation (normal return, handled error or unhandled exception), after the Lambda instrumentor closes the invocation span:
 
-1. If `context.get_remaining_time_in_millis()` is less than the export timeout plus `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` (`2250 ms` by default), the flush is skipped and records stay queued for the next invocation.
-2. The flush runs on a worker thread and the handler waits at most the export timeout, so slow DNS or a hung connection cannot hold the response longer.
-3. After a failure, a process-local circuit breaker skips flushes for `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS`. New records stay queued up to `OTEL_BLRP_MAX_QUEUE_SIZE`, then the oldest are dropped.
-4. Once one batch fails, the rest of that flush fails immediately, so an outage costs at most one export timeout per flush.
+1. If no log records are queued, the flush returns immediately without starting a thread or touching the network.
+2. If `context.get_remaining_time_in_millis()` is less than the export timeout plus `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` (`2250 ms` by default), the flush is skipped and records stay queued for the next invocation.
+3. The flush runs on a worker thread and the handler waits at most the export timeout, so slow DNS or a hung connection cannot hold the response longer.
+4. After a failure, a process-local circuit breaker skips flushes for `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS`. New records stay queued up to `OTEL_BLRP_MAX_QUEUE_SIZE`, then the oldest are dropped.
+5. Once one batch fails, the rest of that flush fails immediately, so an outage costs at most one export timeout per flush.
 
-In SDK 1.45, `BatchLogRecordProcessor.force_flush()` ignores its timeout argument; the exporter timeout bounds each batch. Keep `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` large enough that an invocation fits in one batch.
+Keep `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` large enough that an invocation fits in one batch, because the exporter timeout bounds each batch individually.
 
 Delivery is at least once: a batch that reaches the gateway just as the client times out may be retried. Deduplicate on `trace_id` and `faas.invocation_id` if needed.
 
@@ -356,7 +359,7 @@ otel_native_<framework> = [
 
 No code change is needed. `configure_otel()` enables every installed package registered under the `opentelemetry_instrumentor` entry point group, the same mechanism the `opentelemetry-instrument` CLI uses, and skips any whose target library is missing or the wrong version.
 
-To support a new runtime, subclass `Runtime` in `_runtime.py`, override only the steps that differ (`apply_env_defaults`, `resource_attributes`, `log_record_processor`, `post_configure`), add it to `_RUNTIMES` in `_configuration.py`, and extend `detect_runtime()`.
+To support a new runtime, subclass `Runtime` in `_runtime.py`, override only the steps that differ (`apply_env_defaults`, `resource_attributes`, `log_record_processor`, `post_configure`), add it to `_load_runtime_class()` in `_configuration.py`, and extend `detect_runtime()`.
 
 ## Module layout
 

@@ -16,6 +16,7 @@ When installing the package, the base package comes with only the `logger` modul
 - otel_fastapi _(pre-release)_
 - otel_native _(pre-release)_
 - otel_native_lambda _(pre-release)_
+- otel_native_botocore _(pre-release)_
 - otel_native_fastapi _(pre-release)_
 - django _(pre-release)_
 - all
@@ -74,7 +75,7 @@ More information on usage and setup can be found in the [litellm library readme]
 
 #### OpenTelemetry
 
-Use `i_dot_ai_utilities.otel` for new work. Install `[otel_native]` plus one extra per framework or platform (`[otel_native_lambda]`, `[otel_native_fastapi]`), then call `configure_otel()` at start-up. It detects AWS Lambda, ECS (Fargate or EC2), AWS Batch or a local run, sends Python `logging` output to the `otel-gateway` over OTLP, auto-instruments installed libraries, and enforces the `i_ai` namespace for custom attributes.
+Use `i_dot_ai_utilities.otel` for new work. Install `[otel_native]` plus one extra per framework or platform (`[otel_native_lambda]`, `[otel_native_botocore]`, `[otel_native_fastapi]`), then call `configure_otel()` at start-up. It detects AWS Lambda, ECS (Fargate or EC2), AWS Batch or a local run, sends Python `logging` output to the `otel-gateway` over OTLP, auto-instruments installed libraries, and enforces the `i_ai` namespace for custom attributes.
 
 You can find usage details in the [otel library readme](./src/i_dot_ai_utilities/otel/README.md).
 

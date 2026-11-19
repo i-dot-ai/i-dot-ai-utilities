@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import threading
 import time
 from dataclasses import dataclass, field
@@ -128,8 +129,9 @@ class OtlpCaptureServer:
                 records: list[CapturedLogRecord] = []
 
                 if self.path.endswith("/v1/logs") and raw:
+                    payload = gzip.decompress(raw) if headers.get("content-encoding") == "gzip" else raw
                     proto_req = ExportLogsServiceRequest()
-                    proto_req.ParseFromString(raw)
+                    proto_req.ParseFromString(payload)
                     for resource_logs in proto_req.resource_logs:
                         res_attrs = {kv.key: _any_value_to_python(kv.value) for kv in resource_logs.resource.attributes}
                         for scope_logs in resource_logs.scope_logs:

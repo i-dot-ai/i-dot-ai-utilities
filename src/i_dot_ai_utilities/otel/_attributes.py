@@ -24,6 +24,19 @@ ENV_STRICT_ATTRIBUTES: Final[str] = "I_DOT_AI_OTEL_STRICT_ATTRIBUTES"
 # AWS Lambda's built-in logging handler injects aws_request_id onto every record.
 _LAMBDA_REQUEST_ID_KEY: Final[str] = "aws_request_id"
 _INVOCATION_ID_ATTRIBUTE: Final[str] = "faas.invocation_id"
+# Standard semantic convention attributes injected automatically onto log records by the SDK and Lambda runtime.
+_SDK_LOG_ATTRIBUTES: Final[frozenset[str]] = frozenset(
+    {
+        "code.column.number",
+        "code.file.path",
+        "code.function.name",
+        "code.line.number",
+        "exception.message",
+        "exception.stacktrace",
+        "exception.type",
+        _INVOCATION_ID_ATTRIBUTE,
+    }
+)
 
 _SEGMENT: Final[str] = r"[a-z][a-z0-9_]*"
 # Require at least i_ai.<service>.<property>, while allowing deeper <object>.<property> segments.
@@ -41,10 +54,11 @@ _warned_keys: set[str] = set()
 def _semconv_registry() -> tuple[frozenset[str], tuple[str, ...]]:
     """Scan installed semantic convention modules for exact attribute names and template prefixes.
 
-    Reads `*_attributes.py` source files as text instead of importing ~80
-    modules, cutting cold-start time from ~300 ms to ~5 ms. Unit tests verify
-    that this scan matches importing every module so an upstream format change
-    fails CI.
+    Reads `*_attributes.py` source files as text instead of importing ~100
+    modules, and `warm_semconv_registry()` populates this cache during
+    `configure_otel()` so the disk scan never runs inside a request. Unit tests
+    verify that this scan matches importing every module so an upstream format
+    change fails CI.
 
     Returns:
         A `(names, template_prefixes)` pair where `names` contains exact
@@ -60,6 +74,11 @@ def _semconv_registry() -> tuple[frozenset[str], tuple[str, ...]]:
                 for constant, value in _SEMCONV_CONSTANT.findall(path.read_text(encoding="utf-8")):
                     (templates if constant.endswith("_TEMPLATE") else names).add(value)
     return frozenset(names), tuple(sorted(f"{template}." for template in templates))
+
+
+def warm_semconv_registry() -> None:
+    """Populate the semantic convention cache at startup so the first logged request never scans disk."""
+    _semconv_registry()
 
 
 def is_semconv_attribute(name: str) -> bool:
@@ -78,7 +97,7 @@ def is_semconv_attribute(name: str) -> bool:
 @functools.lru_cache(maxsize=4096)
 def is_valid_attribute_name(name: str) -> bool:
     """Return `True` when `name` matches `i_ai.<service>.<property>` or an OpenTelemetry semantic convention."""
-    return bool(_I_AI_NAME.fullmatch(name)) or is_semconv_attribute(name)
+    return name in _SDK_LOG_ATTRIBUTES or bool(_I_AI_NAME.fullmatch(name)) or is_semconv_attribute(name)
 
 
 def iai_attribute(name: str) -> str:
@@ -199,4 +218,5 @@ __all__ = [
     "is_semconv_attribute",
     "is_valid_attribute_name",
     "validate_attributes",
+    "warm_semconv_registry",
 ]

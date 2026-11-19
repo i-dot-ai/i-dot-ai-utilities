@@ -27,7 +27,7 @@ from opentelemetry.sdk.extension.aws.resource import AwsEcsResourceDetector
 
 from i_dot_ai_utilities.otel._attributes import iai_attribute
 from i_dot_ai_utilities.otel._emf import RateLimitedFailureSignal
-from i_dot_ai_utilities.otel._environment import env_number
+from i_dot_ai_utilities.otel._environment import env_number, is_container_runtime
 from i_dot_ai_utilities.otel._export import FailureReportingExporter
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
 
@@ -51,13 +51,6 @@ BATCH_ENV_TO_ATTRIBUTE: Final[dict[str, str]] = {
     "AWS_BATCH_JOB_ATTEMPT": iai_attribute("aws.batch.job.attempt"),
     "AWS_BATCH_JQ_NAME": iai_attribute("aws.batch.job.queue"),
 }
-
-
-def is_container_runtime() -> bool:
-    """Return `True` when `ECS_CONTAINER_METADATA_URI_V4` or `AWS_BATCH_JOB_ID` is set."""
-    return bool(
-        os.environ.get("ECS_CONTAINER_METADATA_URI_V4", "").strip() or os.environ.get("AWS_BATCH_JOB_ID", "").strip()
-    )
 
 
 def batch_resource_attributes() -> dict[str, AttributeValue]:
