@@ -8,6 +8,7 @@ from i_dot_ai_utilities.metrics.types.embedded_metric_format import (
     EmbeddedMetricFormat,
     StorageResolution,
 )
+from i_dot_ai_utilities.metrics.unit import Unit
 
 
 class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
@@ -30,6 +31,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         metric_name: str,
         value: float,
         dimensions: dict | None = None,
+        unit: str = Unit.Count,
     ) -> None:
         """Put a time-series metric to CloudWatch.
 
@@ -38,20 +40,33 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
         :param metric_name: The name of the metric to log.
         :param value: The numerical metric value.
         :param dimensions: A k/v set of **low-cardinality** dimensions to add to the metric for graphing purposes.
+        :param unit: A Units member or case-insensitive unit string. Defaults to Count; values are not converted.
         """
         try:
-            self._put_metric_internal(metric_name, value, dimensions)
+            self._put_metric_internal(metric_name, value, dimensions, unit)
         except Exception:
             self._logger.exception("Failed to write metric")
 
-    def _put_metric_internal(self, metric_name: str, value: float, dimensions: dict | None = None) -> None:
-        if not metric_name or not value:
+    def _put_metric_internal(
+        self,
+        metric_name: str,
+        value: float,
+        dimensions: dict | None = None,
+        unit: str = Unit.Count,
+    ) -> None:
+        if not metric_name or value is None:
             msg = "Missing required parameter"
             raise ValueError(msg)
 
         if type(metric_name) is not str or type(value) not in [int, float]:
             msg = "Incorrect parameter type"
             raise ValueError(msg)
+
+        try:
+            unit = Unit(unit.title()).value
+        except (AttributeError, ValueError) as e:
+            msg = "Invalid metric unit"
+            raise ValueError(msg) from e
 
         dimensions = dimensions or {}
         dimension_names = list(dimensions.keys()) if dimensions else []
@@ -66,7 +81,7 @@ class CloudwatchEmbeddedMetricsWriter(MetricsWriter):
                         "Metrics": [
                             {
                                 "Name": metric_name,
-                                "Unit": "Count",
+                                "Unit": unit,
                                 "StorageResolution": StorageResolution.STANDARD.value,
                             }
                         ],

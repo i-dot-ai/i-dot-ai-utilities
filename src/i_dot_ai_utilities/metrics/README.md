@@ -88,6 +88,8 @@ def login():
 
 Time-based metrics can also be emitted to get the performance of business-level operations within the app. These floats can then be graphed with stats such as 'Average' or 'p95' to visualise and alert on how the service is performing in the context of a given operation or code path.
 ```python
+from i_dot_ai_utilities.metrics.unit import Unit
+
 def do_expensive_operation():
     timer_start = datetime.datetime.now()
     # Compute lots of things
@@ -98,7 +100,21 @@ def do_expensive_operation():
     metrics.put_metric(
         metric_name="expensive_operation_duration_ms",
         value=timer_result_ms,
+        unit=Unit.Milliseconds,
     )
+```
+
+### Adding Units
+
+Pass the `unit` argument to label a measurement. It defaults to `Unit.Count` (`"Count"`), so existing calls keep the same unit. Units do not convert the value: `unit=Unit.Seconds` expects a value already measured in seconds.
+
+Import `Unit` from `i_dot_ai_utilities.metrics.unit` ([unit.py](./unit.py)), with members such as `Unit.Seconds`, `Unit.Milliseconds`, `Unit.Percent`, and `Unit.CountsPerSecond`. For ratios or measurements without a supported unit, use `Unit.None_` (`"None"`). The CloudWatch writer also accepts strings matching [CloudWatch unit names](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_MetricDatum.html), case-insensitively. Invalid units are logged as write failures and no metric is emitted.
+
+```python
+from i_dot_ai_utilities.metrics.unit import Unit
+
+metrics.put_metric(metric_name="failure_rate", value=0.0, unit=Unit.None_)
+metrics.put_metric(metric_name="processing_time_seconds", value=1.5, unit=Unit.Seconds)
 ```
 
 <br>

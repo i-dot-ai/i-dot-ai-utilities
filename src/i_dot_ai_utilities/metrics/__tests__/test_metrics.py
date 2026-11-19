@@ -8,6 +8,7 @@ from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
 from i_dot_ai_utilities.metrics.cloudwatch import CloudwatchEmbeddedMetricsWriter
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
+from i_dot_ai_utilities.metrics.unit import Unit
 
 
 @pytest.fixture
@@ -48,6 +49,45 @@ def test_simple_metric(capsys, metrics_writer):
     assert metric_block[0].get("Name") == metric_name
     assert metric_block[0].get("Unit") == "Count"
     assert metric_block[0].get("StorageResolution") == 60
+
+
+@pytest.mark.parametrize("value", [0, 0.0])
+def test_zero_metric_is_emitted(capsys, metrics_writer, value):
+    metrics_writer.put_metric("zero_metric", value)
+
+    logged_metric = json.loads(capsys.readouterr().out)
+    assert logged_metric["zero_metric"] == value
+    assert logged_metric["_aws"]["CloudWatchMetrics"][0]["Metrics"][0]["Unit"] == "Count"
+    assert "message" not in logged_metric
+
+
+@pytest.mark.parametrize("unit", [*Unit, "seconds", "MILLISECONDS", "count/second", "none"])
+def test_metric_with_unit(capsys, metrics_writer, unit):
+    metrics_writer.put_metric("unit_metric", 0.0, {"Component": "transcription"}, unit=unit)
+
+    logged_metric = json.loads(capsys.readouterr().out)
+    directive = logged_metric["_aws"]["CloudWatchMetrics"][0]
+    assert directive["Metrics"][0]["Unit"] == unit.title()
+    assert directive["Dimensions"] == [["Component"]]
+    assert logged_metric["Component"] == "transcription"
+    assert logged_metric["unit_metric"] == 0.0
+
+
+@pytest.mark.parametrize("unit", ["unsupported", "", None, 1])
+def test_gracefully_handles_invalid_unit(capsys, metrics_writer, unit):
+    metrics_writer.put_metric("unit_metric", 1, unit=unit)
+
+    logged_message = json.loads(capsys.readouterr().out)
+    assert logged_message["message"] == "Failed to write metric"
+    assert "Invalid metric unit" in logged_message["exception"]
+    assert "_aws" not in logged_message
+
+
+def test_unit_can_be_passed_positionally(capsys, metrics_writer):
+    metrics_writer.put_metric("count_metric", 0, None, Unit.Count)
+
+    logged_metric = json.loads(capsys.readouterr().out)
+    assert logged_metric["_aws"]["CloudWatchMetrics"][0]["Metrics"][0]["Unit"] == "Count"
 
 
 def test_metric_with_dimensions(capsys, metrics_writer):
@@ -103,9 +143,12 @@ def test_gracefully_handles_badly_set_dimension(capsys, metrics_writer):
     ("metric_name", "metric_value", "expected_error_message"),
     [
         (None, 1, "Missing required parameter"),
+        ("", 1, "Missing required parameter"),
         ("test_metric", None, "Missing required parameter"),
         (-99, 1, "Incorrect parameter type"),
         ("test_metric", "broken_value", "Incorrect parameter type"),
+        ("test_metric", False, "Incorrect parameter type"),
+        ("test_metric", True, "Incorrect parameter type"),
     ],
 )
 def test_gracefully_handles_badly_set_field(
