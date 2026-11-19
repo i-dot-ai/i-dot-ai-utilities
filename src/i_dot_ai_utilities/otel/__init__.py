@@ -1,18 +1,9 @@
-"""OpenTelemetry for i.AI Python services on AWS Lambda, ECS (Fargate or EC2), AWS Batch, and locally.
+"""OpenTelemetry for i.AI Python services on AWS Lambda, ECS on Fargate or EC2, AWS Batch, and local runs.
 
-Public API:
-
-- :func:`configure_otel`: configure the OpenTelemetry SDK, the Python
-  ``logging`` handler, and auto-instrumentation for the detected runtime.
-- :func:`flush_otel`: export queued logs now, with a capped wait, when a server shuts down.
-- :func:`iai_attribute`: build a custom attribute name under the ``i_ai`` namespace.
-- :func:`validate_attributes`: check attribute names follow the naming rules.
-- :data:`I_AI_NAMESPACE`: the custom attribute namespace, ``"i_ai"``.
-
-Requires the ``[otel_native]`` extra, plus ``[otel_native_lambda]`` on Lambda
-or a framework extra such as ``[otel_native_fastapi]``. Importing this package
-without ``opentelemetry-*`` installed raises ``ImportError`` so missing
-extras fail fast. See ``README.md`` in this package for usage.
+Install the `otel_native` extra for every runtime, plus `otel_native_lambda` on
+Lambda or a framework extra such as `otel_native_fastapi`. Importing this
+package without `opentelemetry-*` installed raises `ImportError` at import time
+so missing extras fail before the service starts.
 """
 
 from __future__ import annotations

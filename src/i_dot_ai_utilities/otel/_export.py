@@ -1,4 +1,4 @@
-"""OTLP log exporters and processors: failure reporting, plus the Lambda outage circuit breaker."""
+"""Wrap OTLP log exporters and processors with EMF failure reporting and the Lambda outage circuit breaker."""
 
 from __future__ import annotations
 
@@ -26,12 +26,18 @@ DEFAULT_CIRCUIT_BREAKER_SECONDS: Final[float] = 30.0
 
 
 def resolve_circuit_breaker_seconds() -> float:
-    """Return the open-circuit duration in seconds from the environment."""
+    """Read `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS`, defaulting to 30.0 seconds."""
     return env_number(ENV_CIRCUIT_BREAKER_SECONDS, DEFAULT_CIRCUIT_BREAKER_SECONDS)
 
 
 class ExportCircuitBreaker:
-    """Process-local monotonic circuit breaker for synchronous Lambda flushes."""
+    """Thread-safe monotonic-clock circuit breaker for synchronous Lambda log flushes.
+
+    Opens for `open_seconds` on the monotonic clock after an export or flush
+    failure so subsequent batches and invocations fail fast without waiting on
+    network timeouts. Guards all state transitions with a lock because the
+    flush worker thread and the Lambda main thread share one instance.
+    """
 
     def __init__(
         self,
@@ -45,6 +51,7 @@ class ExportCircuitBreaker:
         self._lock = threading.Lock()
 
     def is_open(self) -> bool:
+        """Return `True` while within the open window, clearing expired open state once it elapses."""
         with self._lock:
             if self._open_until is None:
                 return False
@@ -54,19 +61,22 @@ class ExportCircuitBreaker:
             return False
 
     def record_success(self) -> None:
+        """Close the breaker after a batch exports cleanly."""
         with self._lock:
             self._open_until = None
 
     def record_failure(self) -> None:
+        """Open the breaker, or extend an existing open window to `open_seconds` from now."""
         with self._lock:
             self._open_until = self._clock() + self._open_seconds
 
 
 class FailureReportingExporter(LogRecordExporter):
-    """Wraps a ``LogRecordExporter`` and calls ``on_failure`` when an export fails or raises.
+    """Invoke `on_failure` whenever the delegate OTLP exporter returns `FAILURE` or raises.
 
-    Used by long-running runtimes, where exports run on the SDK's background
-    thread and never block the application.
+    Long-running container runtimes export on the SDK's background thread
+    outside the request path, so they report failures and let the SDK retry
+    rather than opening a circuit breaker.
     """
 
     def __init__(self, delegate: LogRecordExporter, on_failure: Callable[[str], None]) -> None:
@@ -74,9 +84,10 @@ class FailureReportingExporter(LogRecordExporter):
         self._on_failure = on_failure
 
     def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+        """Export `batch` through the delegate, converting uncaught exceptions into `FAILURE`."""
         try:
             result = self._delegate.export(batch)
-        except Exception:  # noqa: BLE001 - exporter contract catches all export errors
+        except Exception:  # noqa: BLE001
             result = LogRecordExportResult.FAILURE
         if result is not LogRecordExportResult.SUCCESS:
             self._on_failure("export_failure")
@@ -90,7 +101,13 @@ class FailureReportingExporter(LogRecordExporter):
 
 
 class TrackedLogRecordExporter(LogRecordExporter):
-    """Wraps a ``LogRecordExporter`` and records export outcomes on the breaker."""
+    """Record batch export outcomes on `ExportCircuitBreaker` and per-flush state.
+
+    `BatchLogRecordProcessor.force_flush()` returns `True` whenever its worker
+    drains the queue in time, even if `export()` returned `FAILURE`. Tracking
+    `_failed_since_reset` lets `flush_lambda_logs` tell a clean flush apart
+    from a failed HTTP export.
+    """
 
     def __init__(
         self,
@@ -107,24 +124,27 @@ class TrackedLogRecordExporter(LogRecordExporter):
         return self._breaker
 
     def reset_window(self) -> None:
+        """Clear the per-flush failure flag before starting a synchronous Lambda flush."""
         with self._lock:
             self._failed_since_reset = False
 
     def consume_failure(self) -> bool:
+        """Return and clear whether any batch failed since the last `reset_window` call."""
         with self._lock:
             failed = self._failed_since_reset
             self._failed_since_reset = False
             return failed
 
     def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
-        # Once one batch fails, fail the rest of this flush immediately so an
-        # outage costs one exporter timeout, not one per queued batch.
+        """Export `batch` when the breaker is closed, opening the breaker on error or `FAILURE`."""
+        # Fail remaining batches in this flush once the breaker opens so an outage costs
+        # at most one exporter timeout per invocation rather than one per queued batch.
         if self._breaker.is_open():
             return LogRecordExportResult.FAILURE
 
         try:
             result = self._delegate.export(batch)
-        except Exception:  # noqa: BLE001 - exporter contract catches all export errors
+        except Exception:  # noqa: BLE001
             self._record_failure()
             return LogRecordExportResult.FAILURE
 
@@ -148,13 +168,19 @@ class TrackedLogRecordExporter(LogRecordExporter):
 
 
 class TrackedBatchLogRecordProcessor(LogRecordProcessor):
-    """Wraps ``BatchLogRecordProcessor`` and keeps records queued while the breaker is open."""
+    """Buffer log records without waking the background worker while `ExportCircuitBreaker` is open.
+
+    `BatchLogRecordProcessor.on_emit` wakes its background export thread as
+    soon as `max_export_batch_size` records accumulate, which would trigger
+    doomed network calls mid-invocation during a gateway outage. Wrapping it on
+    Lambda bypasses that wake-up while the circuit breaker is open.
+    """
 
     def __init__(self, exporter: TrackedLogRecordExporter) -> None:
         self._exporter = exporter
         self._processor = BatchLogRecordProcessor(exporter)
-        # SDK internal: the bounded deque behind ``BatchLogRecordProcessor``. A unit
-        # test asserts it exists, so an SDK upgrade that removes it fails CI.
+        # Reach into the bounded deque behind BatchLogRecordProcessor so on_emit can enqueue
+        # records without signalling the worker. TestSdkInternals verifies this attribute on upgrades.
         batch_processor = getattr(self._processor, "_batch_processor", None)
         self._queue = getattr(batch_processor, "_queue", None)
 
@@ -163,10 +189,13 @@ class TrackedBatchLogRecordProcessor(LogRecordProcessor):
         return self._exporter
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
+        """Enqueue onto the bounded deque without waking the worker while the breaker is open."""
         if self._exporter.breaker.is_open() and self._queue is not None:
-            # Do not wake the background export worker while the breaker is open;
-            # the bounded deque drops the oldest record once it is full.
+            # Append directly to the bounded deque so the background export worker stays asleep,
+            # letting collections.deque drop the oldest record once max_queue_size is reached.
             resource = log_record.resource if log_record.resource is not None else Resource.create({})
+            # Shallow-copy the API record with an empty Context() so buffered records do not retain
+            # active span and request objects in memory across Lambda invocations.
             api_log_record = copy(log_record.log_record)
             api_log_record.context = Context()
             readable = ReadableLogRecord(

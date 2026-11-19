@@ -1,10 +1,9 @@
-"""Auto-instrument every installed OpenTelemetry instrumentation package.
+"""Discover and enable installed OpenTelemetry library instrumentors via entry points.
 
-Uses the same ``opentelemetry_instrumentor`` entry points as the
-``opentelemetry-instrument`` CLI, so installing a framework extra such as
-``otel_native_fastapi`` is enough to instrument that framework. The CLI's own
-``initialize()`` is not used because it also runs the distro configurator,
-which would replace the providers ``configure_otel`` sets up.
+`configure_otel` loads `opentelemetry_instrumentor` entry points itself rather
+than calling `opentelemetry-instrument`'s `initialize()` helper. Calling
+`initialize()` would run the distro configurator a second time and replace the
+SDK providers that `configure_otel` already configured.
 """
 
 from __future__ import annotations
@@ -18,18 +17,23 @@ from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISA
 
 
 def disabled_instrumentations() -> set[str]:
-    """Return entry point names listed in ``OTEL_PYTHON_DISABLED_INSTRUMENTATIONS``."""
+    """Parse comma-separated names from `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`, where `"*"` disables all."""
     raw = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
     return {name.strip() for name in raw.split(",") if name.strip()}
 
 
 def instrument_installed_libraries(*, skip: frozenset[str] = frozenset()) -> list[str]:
-    """Instrument each installed library whose instrumentor's version requirements are met.
+    """Activate every installed `opentelemetry_instrumentor` entry point whose target library is present.
 
-    ``skip`` holds entry point names a runtime instruments itself (for
-    example ``aws-lambda``, which must wrap the handler in a fixed order).
-    Returns the names that were instrumented. A failing instrumentor is
-    reported on stderr and skipped, so one broken package never stops start-up.
+    Logs unexpected instrumentor failures to `stderr` and continues so a
+    broken third-party instrumentor never prevents application startup.
+
+    Args:
+        skip: Entry point names that the active runtime instruments directly,
+            such as `"aws-lambda"` when wrapping the handler in a fixed order.
+
+    Returns:
+        Entry point names that were instrumented or already active.
     """
     excluded = disabled_instrumentations() | skip
     instrumented: list[str] = []
@@ -38,16 +42,17 @@ def instrument_installed_libraries(*, skip: frozenset[str] = frozenset()) -> lis
             continue
         try:
             if entry_point.dist is not None and get_dist_dependency_conflicts(entry_point.dist) is not None:
-                # The instrumented library is missing or the wrong version; nothing to instrument.
+                # Skip instrumentors whose target package is missing or outside its supported version range.
                 continue
             instrumentor = entry_point.load()()
             if not instrumentor.is_instrumented_by_opentelemetry:
                 instrumentor.instrument(skip_dep_check=True)
             instrumented.append(entry_point.name)
         except ModuleNotFoundError:
-            # The instrumented library is not installed (botocore's package also ships aiobotocore's instrumentor).
+            # Multi-hook packages such as opentelemetry-instrumentation-botocore also register
+            # entry points for optional libraries like aiobotocore that may not be installed.
             continue
-        except Exception as exc:  # noqa: BLE001 - instrumentation must never break start-up
+        except Exception as exc:  # noqa: BLE001
             sys.stderr.write(
                 f"i_dot_ai_utilities.otel: failed to instrument {entry_point.name!r} "
                 f"({type(exc).__name__}); skipping.\n"
@@ -56,13 +61,13 @@ def instrument_installed_libraries(*, skip: frozenset[str] = frozenset()) -> lis
 
 
 def uninstrument_installed_libraries() -> None:
-    """Undo :func:`instrument_installed_libraries` (used by tests)."""
+    """Deactivate every active OpenTelemetry instrumentor during test teardown."""
     for entry_point in entry_points(group="opentelemetry_instrumentor"):
         try:
             instrumentor = entry_point.load()()
             if instrumentor.is_instrumented_by_opentelemetry:
                 instrumentor.uninstrument()
-        except Exception:  # noqa: BLE001, S112 - best-effort teardown
+        except Exception:  # noqa: BLE001, S112
             continue
 
 

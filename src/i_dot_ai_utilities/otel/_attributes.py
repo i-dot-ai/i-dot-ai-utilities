@@ -1,4 +1,4 @@
-"""Attribute naming rules: OpenTelemetry semantic conventions first, otherwise the ``i_ai`` namespace."""
+"""Validate log attribute names against OpenTelemetry semantic conventions and the `i_ai` namespace."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ if TYPE_CHECKING:
 I_AI_NAMESPACE: Final[str] = "i_ai"
 UNNAMESPACED_PREFIX: Final[str] = f"{I_AI_NAMESPACE}.unnamespaced."
 ENV_STRICT_ATTRIBUTES: Final[str] = "I_DOT_AI_OTEL_STRICT_ATTRIBUTES"
-# The Lambda runtime's stdout handler stamps this on every record; the application did not choose the name.
+# AWS Lambda's built-in logging handler injects aws_request_id onto every record.
 _LAMBDA_REQUEST_ID_KEY: Final[str] = "aws_request_id"
 _INVOCATION_ID_ATTRIBUTE: Final[str] = "faas.invocation_id"
 
 _SEGMENT: Final[str] = r"[a-z][a-z0-9_]*"
-# ``i_ai.<service>.<property>`` at minimum; deeper ``<object>.<property>`` levels are allowed.
+# Require at least i_ai.<service>.<property>, while allowing deeper <object>.<property> segments.
 _I_AI_NAME: Final[re.Pattern[str]] = re.compile(rf"{I_AI_NAMESPACE}(\.{_SEGMENT}){{2,}}")
 _SEMCONV_CONSTANT: Final[re.Pattern[str]] = re.compile(r'^([A-Z][A-Z0-9_]*): Final = "([^"]+)"', re.MULTILINE)
 _SEMCONV_PACKAGES: Final[tuple[str, ...]] = (
@@ -39,11 +39,17 @@ _warned_keys: set[str] = set()
 
 @functools.cache
 def _semconv_registry() -> tuple[frozenset[str], tuple[str, ...]]:
-    """Return ``(attribute names, template prefixes)`` from the installed semantic conventions package.
+    """Scan installed semantic convention modules for exact attribute names and template prefixes.
 
-    The constants are read from source rather than imported: importing all
-    ~80 modules costs ~300 ms of cold start, reading them costs ~5 ms. A unit
-    test checks both methods agree, so a format change in a new release fails CI.
+    Reads `*_attributes.py` source files as text instead of importing ~80
+    modules, cutting cold-start time from ~300 ms to ~5 ms. Unit tests verify
+    that this scan matches importing every module so an upstream format change
+    fails CI.
+
+    Returns:
+        A `(names, template_prefixes)` pair where `names` contains exact
+        semantic convention keys and `template_prefixes` contains sorted
+        prefixes that include a trailing dot.
     """
     names: set[str] = set()
     templates: set[str] = set()
@@ -57,10 +63,11 @@ def _semconv_registry() -> tuple[frozenset[str], tuple[str, ...]]:
 
 
 def is_semconv_attribute(name: str) -> bool:
-    """Return True when ``name`` is in the OpenTelemetry attribute registry.
+    """Return `True` when `name` matches an OpenTelemetry semantic convention attribute.
 
-    Template attributes such as ``http.request.header.<key>`` match any
-    non-empty ``<key>``, because the key is set by the source (``content-type``).
+    Template attributes such as `http.request.header.<key>` match any
+    non-empty `<key>` suffix after the prefix dot, such as
+    `http.request.header.content-type`.
     """
     names, template_prefixes = _semconv_registry()
     if name in names:
@@ -70,15 +77,27 @@ def is_semconv_attribute(name: str) -> bool:
 
 @functools.lru_cache(maxsize=4096)
 def is_valid_attribute_name(name: str) -> bool:
-    """Return True for a semantic convention name or a well-formed ``i_ai.<service>.<property>`` name."""
+    """Return `True` when `name` matches `i_ai.<service>.<property>` or an OpenTelemetry semantic convention."""
     return bool(_I_AI_NAME.fullmatch(name)) or is_semconv_attribute(name)
 
 
 def iai_attribute(name: str) -> str:
-    """Return ``i_ai.<name>``, raising ``ValueError`` unless ``name`` is ``<service>.<property>`` or deeper.
+    """Build a custom attribute key under the `i_ai` namespace.
 
-    >>> iai_attribute("auth.decision.reason")
-    'i_ai.auth.decision.reason'
+    Define attribute keys as module-level constants rather than inline inside
+    `logger.info(..., extra={...})` calls. Invalid names then fail at import
+    time in tests instead of raising inside a request.
+
+    Args:
+        name: Dot-separated `<service>.<property>` or deeper suffix in
+            lowercase `snake_case`, without the `i_ai.` prefix.
+
+    Returns:
+        The full `i_ai.<name>` attribute key.
+
+    Raises:
+        ValueError: If `name` has fewer than two segments or is not lowercase
+            `snake_case`.
     """
     full_name = f"{I_AI_NAMESPACE}.{name}"
     if not _I_AI_NAME.fullmatch(full_name):
@@ -91,7 +110,23 @@ def iai_attribute(name: str) -> str:
 
 
 def validate_attributes(attributes: Mapping[str, Any]) -> dict[str, Any]:
-    """Return ``attributes`` as a dict, raising ``ValueError`` listing every non-compliant key."""
+    """Verify that every key in `attributes` follows OpenTelemetry or `i_ai` naming rules.
+
+    Accepts OpenTelemetry semantic convention keys, including populated
+    template keys such as `http.request.header.content-type`, and custom keys
+    built with `iai_attribute`.
+
+    Args:
+        attributes: Attribute mapping to check before attaching to a log record
+            or span.
+
+    Returns:
+        A shallow `dict` copy of `attributes` when all keys are valid.
+
+    Raises:
+        ValueError: Lists every key that is neither an OpenTelemetry semantic
+            convention nor a valid `i_ai.<service>.<property>` key.
+    """
     invalid = sorted(key for key in attributes if not is_valid_attribute_name(key))
     if invalid:
         msg = (
@@ -103,25 +138,27 @@ def validate_attributes(attributes: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class AttributeNamespaceProcessor(LogRecordProcessor):
-    """Move non-compliant log attribute keys under ``i_ai.unnamespaced.`` before export.
+    """Normalize and enforce attribute namespaces on every emitted SDK log record.
 
-    Registered ahead of the export processors, so exporters only ever see
-    compliant keys, and it still runs when export is off (``OTEL_LOGS_EXPORTER=none``).
-    Keys are renamed rather than dropped so no data is lost, and each offending
-    key is reported once on stderr. Set ``I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true``
-    to raise ``ValueError`` from the logging call instead, for tests and CI.
+    `configure_otel` registers this processor ahead of export processors, so
+    exporters receive only compliant keys and `I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true`
+    still catches invalid keys in tests when `OTEL_LOGS_EXPORTER=none`. Moves
+    non-compliant keys under `i_ai.unnamespaced.*` rather than dropping them so
+    log fields stay intact while warning once per offending key on `stderr`.
     """
 
     def __init__(self) -> None:
         self._strict = env_flag(ENV_STRICT_ATTRIBUTES, default=False)
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
+        """Rewrite `aws_request_id` to `faas.invocation_id` and either reject or namespace invalid keys in place."""
         attributes = log_record.log_record.attributes
         if attributes:
             if _LAMBDA_REQUEST_ID_KEY in attributes:
                 request_id = attributes[_LAMBDA_REQUEST_ID_KEY]
                 del attributes[_LAMBDA_REQUEST_ID_KEY]  # type: ignore[attr-defined]
-                if request_id:  # empty outside an invocation
+                # Skip empty request IDs recorded outside an active Lambda invocation.
+                if request_id:
                     attributes[_INVOCATION_ID_ATTRIBUTE] = request_id  # type: ignore[index]
             invalid = [key for key in attributes if not is_valid_attribute_name(key)]
             if invalid:
@@ -129,7 +166,8 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
                     validate_attributes(attributes)
                 for key in invalid:
                     value = attributes[key]
-                    # Delete first: BoundedAttributes evicts the oldest key when a set exceeds its limit.
+                    # Delete the old key before inserting the renamed key so BoundedAttributes
+                    # does not evict an unrelated oldest entry when the record is at its attribute limit.
                     del attributes[key]  # type: ignore[attr-defined]
                     attributes[f"{UNNAMESPACED_PREFIX}{key}"] = value  # type: ignore[index]
                     _warn_once(key)
@@ -142,6 +180,7 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
 
 
 def _warn_once(key: str) -> None:
+    """Write a `stderr` warning for a non-compliant attribute `key` at most once per process."""
     if key in _warned_keys:
         return
     _warned_keys.add(key)

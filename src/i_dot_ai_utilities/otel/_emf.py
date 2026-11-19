@@ -1,7 +1,7 @@
-"""CloudWatch Embedded Metric Format (EMF) failure signal for OTLP log exports.
+"""Emit CloudWatch Embedded Metric Format failure signals when OTLP log exports fail.
 
-CloudWatch Logs turns any log event in this format into a metric, whether it
-arrives from Lambda or from ECS ``awslogs``, so one alarm pattern covers both.
+CloudWatch Logs extracts metrics from stdout lines in this format on both AWS
+Lambda and ECS `awslogs`, so one `ExportFailures` alarm covers both runtimes.
 """
 
 from __future__ import annotations
@@ -18,11 +18,19 @@ EMF_EVENT_NAME: Final[str] = "otel_log_export_failed"
 
 
 def emit_export_failure(reason: str, *, dimension: str, value: str) -> None:
-    """Write one stdout line that is both a structured warning and an EMF metric.
+    """Write one stdout JSON line formatted as both a structured warning and a CloudWatch EMF metric.
 
-    The payload intentionally excludes endpoints, headers, request bodies,
-    tokens, and raw exception strings so sensitive data can never leak to
-    CloudWatch when an export fails.
+    The payload excludes endpoints, headers, request bodies, tokens, and raw
+    exception strings so sensitive data cannot leak to CloudWatch when an
+    export fails.
+
+    Args:
+        reason: Short machine-readable failure code such as `"export_failure"`
+            or `"flush_timeout"`. Never pass raw exception text.
+        dimension: CloudWatch metric dimension key, such as `"FunctionName"`
+            or `"ServiceName"`.
+        value: Dimension value identifying the failing Lambda function or
+            container service.
     """
     payload = {
         "_aws": {
@@ -46,7 +54,7 @@ def emit_export_failure(reason: str, *, dimension: str, value: str) -> None:
 
 
 class RateLimitedFailureSignal:
-    """Emit at most one EMF failure line per ``interval_seconds``, so an outage cannot flood stdout."""
+    """Thread-safe callable that emits at most one EMF failure line per `interval_seconds` to prevent stdout floods."""
 
     def __init__(self, *, dimension: str, value: str, interval_seconds: float = 60.0) -> None:
         self._dimension = dimension
@@ -56,6 +64,7 @@ class RateLimitedFailureSignal:
         self._lock = threading.Lock()
 
     def __call__(self, reason: str) -> None:
+        """Emit an EMF failure line for `reason`, dropping calls that arrive before `interval_seconds` elapses."""
         now = time.monotonic()
         with self._lock:
             if self._last is not None and now - self._last < self._interval:

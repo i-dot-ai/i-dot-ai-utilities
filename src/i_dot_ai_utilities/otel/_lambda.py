@@ -1,9 +1,10 @@
-"""AWS Lambda runtime: env defaults, resource, circuit-breaker export, and per-invocation log flushing.
+"""OpenTelemetry runtime support and synchronous log flushing for AWS Lambda.
 
-Lambda freezes the process as soon as the handler returns, so the SDK's
-background export thread cannot be relied on. Instead the handler is wrapped
-to flush logs synchronously, bounded by the export timeout and skipped while
-the outage circuit breaker is open.
+AWS Lambda freezes the execution environment as soon as the handler returns, so
+the SDK's background export thread can stall mid-request between invocations.
+`LambdaRuntime` wraps the handler to flush logs synchronously within the export
+timeout, and opens a process-local circuit breaker after failures so gateway
+outages do not add latency to every invocation.
 """
 
 from __future__ import annotations
@@ -49,9 +50,8 @@ DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
 DEFAULT_LAMBDA_MAX_QUEUE_SIZE: Final[str] = "2048"
-# Keep the background worker delay safely above the default 30s circuit-breaker
-# window so records remain queued while the breaker is open and are flushed on
-# invocation boundaries instead.
+# Set the background worker interval to 60 seconds, above the 30-second default circuit-breaker
+# window, so records stay queued while the breaker is open and flush at invocation boundaries.
 DEFAULT_LAMBDA_SCHEDULE_DELAY_MILLIS: Final[str] = "60000"
 DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS: Final[str] = "2000"
 OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT: Final[str] = "OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT"
@@ -62,7 +62,7 @@ _inflight_flush: threading.Thread | None = None
 
 
 def emit_lambda_export_failure(reason: str) -> None:
-    """Emit the EMF ``ExportFailures`` line with the ``FunctionName`` dimension."""
+    """Emit an EMF `ExportFailures` metric for `AWS_LAMBDA_FUNCTION_NAME`, or `"unknown"` when unset."""
     emit_export_failure(
         reason,
         dimension="FunctionName",
@@ -71,7 +71,12 @@ def emit_lambda_export_failure(reason: str) -> None:
 
 
 def is_lambda_runtime_stdout_handler(handler: logging.Handler) -> bool:
-    """Return True only for the AWS Lambda Python runtime's built-in root handlers."""
+    """Return `True` for AWS Lambda's built-in `awslambdaric` root handlers.
+
+    Checks `__module__` and `__name__` strings instead of `isinstance` because
+    `awslambdaric` is only installed inside the managed Lambda runtime and
+    defines multiple `LambdaLoggerHandler` classes.
+    """
     cls = type(handler)
     module_name = getattr(cls, "__module__", "") or ""
     class_name = getattr(cls, "__name__", "") or ""
@@ -81,10 +86,14 @@ def is_lambda_runtime_stdout_handler(handler: logging.Handler) -> bool:
 def remove_lambda_runtime_stdout_handlers(
     root_logger: logging.Logger | None = None,
 ) -> int:
-    """Remove only ``awslambdaric``'s root handlers so application logs are not duplicated.
+    """Detach `awslambdaric` stdout handlers from `root_logger` to avoid duplicate CloudWatch logs.
 
-    Keeps them unless the app opted out of stdout logs, and always when OTLP log
-    export is disabled, so turning export off never turns application logging off.
+    Preserves the runtime handlers when stdout logging is enabled or when OTLP
+    log export is disabled so disabling export never silences logs. Leaves
+    application-added handlers untouched so custom logging setup keeps working.
+
+    Returns:
+        The number of `awslambdaric` handlers removed from `root_logger`.
     """
     if logs_export_disabled() or keep_stdout_logs():
         return 0
@@ -98,10 +107,11 @@ def remove_lambda_runtime_stdout_handlers(
 
 
 def resolve_logs_export_timeout_ms() -> int:
-    """Return the configured OTLP logs export timeout in milliseconds.
+    """Resolve the OTLP logs export timeout in milliseconds, defaulting to 2000 ms.
 
-    Python's OTLP HTTP exporter interprets ``OTEL_EXPORTER_OTLP_LOGS_TIMEOUT``
-    and ``OTEL_EXPORTER_OTLP_TIMEOUT`` as seconds (default 10s, Lambda default 2s).
+    Python's OTLP HTTP exporter reads `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` and
+    `OTEL_EXPORTER_OTLP_TIMEOUT` in seconds rather than milliseconds, with a
+    2-second default on Lambda instead of the SDK's 10-second default.
     """
     raw = (
         os.environ.get(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT)
@@ -118,17 +128,23 @@ def resolve_logs_export_timeout_ms() -> int:
 
 
 def resolve_flush_margin_ms() -> int:
-    """Return the remaining-time safety margin in milliseconds."""
+    """Return the `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS` buffer in milliseconds.
+
+    `flush_lambda_logs` requires at least the export timeout plus this margin
+    on the Lambda context clock so a flush cannot run into the invocation
+    timeout.
+    """
     return int(env_number(ENV_FLUSH_MARGIN_MS, DEFAULT_FLUSH_MARGIN_MS))
 
 
 def _remaining_time_millis(context: Any) -> int | None:
+    """Read `get_remaining_time_in_millis()` from the Lambda `context`, or `None` when unavailable."""
     getter = getattr(context, "get_remaining_time_in_millis", None)
     if not callable(getter):
         return None
     try:
         remaining = getter()
-    except Exception:  # noqa: BLE001 - defensive probe on caller context
+    except Exception:  # noqa: BLE001
         return None
     if isinstance(remaining, int | float):
         return int(remaining)
@@ -136,29 +152,40 @@ def _remaining_time_millis(context: Any) -> int | None:
 
 
 def _run_flush(processor: TrackedBatchLogRecordProcessor, timeout_ms: int, outcome: dict[str, bool]) -> None:
+    """Flush logs into `outcome["flushed"]`, catching all errors so a worker failure never crashes the thread."""
     try:
-        # Flush through the provider so every configured exporter is flushed, not only the tracked one.
+        # Flush via provider.force_flush when available so every registered log processor flushes alongside processor.
         provider = get_logger_provider()
         if hasattr(provider, "force_flush"):
             outcome["flushed"] = bool(provider.force_flush(timeout_ms))
         else:
             outcome["flushed"] = processor.force_flush(timeout_ms)
-    except Exception:  # noqa: BLE001 - flush must never break the handler
+    except Exception:  # noqa: BLE001
         outcome["flushed"] = False
 
 
-def flush_lambda_logs(  # noqa: PLR0911 - each early return is a distinct skip reason
+def flush_lambda_logs(  # noqa: PLR0911
     context: Any,
     *,
     processor: TrackedBatchLogRecordProcessor | None,
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
-    """Flush queued OTLP logs at the end of a Lambda invocation.
+    """Flush queued OTLP logs synchronously at the end of a Lambda invocation.
 
-    The flush runs on a worker thread and the handler waits at most the export
-    timeout, so a slow DNS lookup or connect cannot hold the response beyond it.
-    Returns True when a flush ran and succeeded, False when skipped or failed.
+    Skips the flush when `processor` is `None`, the circuit breaker is open, an
+    earlier timed-out flush thread is still alive, or the invocation has less
+    than the export timeout plus `I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS`
+    remaining. Runs the flush on a daemon thread capped at the export timeout
+    so slow DNS resolution or a hung socket cannot hold the response longer.
+
+    When `force_flush` returns `False` without an exporter failure, such as a
+    queue-drain timeout inside `BatchLogRecordProcessor`, records a failure on
+    `breaker` directly because `TrackedLogRecordExporter` was never reached.
+
+    Returns:
+        `True` when no processor is configured or the flush succeeded, or
+        `False` when the flush was skipped or failed.
     """
     global _inflight_flush  # noqa: PLW0603
 
@@ -166,7 +193,7 @@ def flush_lambda_logs(  # noqa: PLR0911 - each early return is a distinct skip r
         return True
 
     if breaker.is_open():
-        # Keep the failure metric flowing for the whole outage, not just its first flush.
+        # Emit ExportFailures on every skipped flush so CloudWatch alarms stay active throughout an outage.
         failure_emitter("breaker_open")
         return False
 
@@ -193,7 +220,7 @@ def flush_lambda_logs(  # noqa: PLR0911 - each early return is a distinct skip r
     worker.join(timeout_ms / 1000)
 
     if worker.is_alive():
-        # Abandon the stuck export; it finishes or fails on a later thaw, and later flushes skip while it runs.
+        # Track the stuck worker thread so subsequent invocations skip flushing until it finishes on a later thaw.
         _inflight_flush = worker
         failure_emitter("flush_timeout")
         return False
@@ -211,7 +238,13 @@ def flush_lambda_logs(  # noqa: PLR0911 - each early return is a distinct skip r
 
 
 def resolve_lambda_handler_target() -> tuple[str, str] | None:
-    """Resolve ``(module_name, function_name)`` from ``ORIG_HANDLER`` or ``_HANDLER``."""
+    """Parse `(module_name, function_name)` from `ORIG_HANDLER` or `_HANDLER`.
+
+    Checks `ORIG_HANDLER` before `_HANDLER` because Lambda wrapper scripts
+    reassign `_HANDLER` to themselves and preserve the user's handler in
+    `ORIG_HANDLER`. Replaces path slashes with dots to support Lambda's
+    `package/module.handler` syntax.
+    """
     raw_handler = os.environ.get("ORIG_HANDLER") or os.environ.get("_HANDLER")
     if not raw_handler:
         return None
@@ -230,11 +263,22 @@ def instrument_lambda_handler(
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
-    """Instrument the Lambda handler, then install the outer log flush wrapper around it.
+    """Wrap the Lambda handler with tracing inner instrumentation and an outer log flush.
 
-    Returns True when the handler is wrapped, False when it could not be found.
-    Raises ``ImportError`` when ``opentelemetry-instrumentation-aws-lambda`` is
-    missing, so a Lambda deployed without the ``[otel_native_lambda]`` extra fails fast.
+    `AwsLambdaInstrumentor` wraps the user handler first as the inner layer,
+    and `_flush_logs_wrapper` wraps that instrumented callable second as the
+    outer layer. Running `_flush_logs_wrapper` on the outside means its
+    `finally` block calls `flush_lambda_logs` only after the invocation span
+    closes and records any unhandled exception.
+
+    Returns:
+        `True` if the handler is wrapped, or `False` if `ORIG_HANDLER` and
+        `_HANDLER` are unset, the module fails to import, or the function is
+        not yet defined on the module.
+
+    Raises:
+        ImportError: If `opentelemetry-instrumentation-aws-lambda` from the
+            `otel_native_lambda` extra is not installed.
     """
     from opentelemetry.instrumentation.aws_lambda import (  # noqa: PLC0415
         AwsLambdaInstrumentor,
@@ -250,7 +294,7 @@ def instrument_lambda_handler(
     module_name, function_name = target
     try:
         handler_module = importlib.import_module(module_name)
-    except Exception:  # noqa: BLE001 - fail-open on bad handler module
+    except Exception:  # noqa: BLE001
         sys.stderr.write(
             f"i_dot_ai_utilities.otel: failed to import handler module {module_name!r}; skipping handler wrapping.\n"
         )
@@ -277,6 +321,7 @@ def instrument_lambda_handler(
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
+        """Call the instrumented handler and flush queued OTLP logs after the invocation span closes."""
         context = args[1] if len(args) > 1 else kwargs.get("context")
         try:
             return wrapped(*args, **kwargs)
@@ -297,7 +342,13 @@ def instrument_lambda_handler(
 
 
 class LambdaRuntime(Runtime):
-    """AWS Lambda: synchronous, time-bounded flush at the end of every invocation."""
+    """Configure OpenTelemetry for AWS Lambda with circuit-breaker export and per-invocation flushing.
+
+    Wraps the handler directly instead of using the generic entry-point loader
+    so the log flush runs outside `AwsLambdaInstrumentor`, and removes
+    `awslambdaric` stdout handlers only when OTLP export and handler wrapping
+    are both active.
+    """
 
     self_instrumented = frozenset({"aws-lambda"})
     missing_endpoint_message = (
@@ -313,6 +364,8 @@ class LambdaRuntime(Runtime):
     def apply_env_defaults(self, *, can_export: bool) -> None:
         super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
+        # Leave OTEL_EXPORTER_OTLP_LOGS_TIMEOUT unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
+        # because the signal-specific variable would otherwise shadow the caller's general timeout.
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
         os.environ.setdefault(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE)
@@ -333,21 +386,20 @@ class LambdaRuntime(Runtime):
         return processor
 
     def post_configure(self, provider: LoggerProvider) -> None:
-        # Lambda freezes and terminates processes outside invocation boundaries;
-        # an ``atexit`` shutdown would bypass the outage circuit breaker and drain
-        # queued records with a blocking export on exit.
+        # Lambda freezes and terminates environments outside invocation boundaries. Remove the SDK
+        # atexit hook so process teardown cannot bypass the circuit breaker with a blocking flush.
         unregister_sdk_atexit(provider)
         self.on_reconfigure()
 
     def on_reconfigure(self) -> None:
-        # A second call after the handler is defined still wraps it, if the first call ran too early.
-        # Stdout is only dropped once the per-invocation flush is in place, or nothing would carry the logs.
+        # Retry handler wrapping if an earlier configure_otel() call ran before the handler existed.
+        # Remove awslambdaric stdout handlers only after wrapping succeeds so logs are never dropped.
         if instrument_lambda_handler(processor=self.processor, breaker=self.breaker):
             remove_lambda_runtime_stdout_handlers()
 
 
 def reset_inflight_flush() -> None:
-    """Forget an abandoned flush thread (used by tests)."""
+    """Clear any tracked timed-out flush worker thread during test teardown."""
     global _inflight_flush  # noqa: PLW0603
     _inflight_flush = None
 

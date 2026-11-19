@@ -1,11 +1,12 @@
-"""Long-running AWS containers: ECS on Fargate or EC2, and AWS Batch jobs.
+"""OpenTelemetry runtime support for AWS ECS tasks on Fargate or EC2 and AWS Batch jobs.
 
-The process keeps running between requests, so logs are exported by the SDK's
-background ``BatchLogRecordProcessor`` thread and the request path never waits
-on the network. This runtime adds what the SDK lacks for containers: a capped
-shutdown so a hung gateway cannot hold a stopping task past ECS
-``stopTimeout``, a SIGTERM handler so plain scripts still flush on stop, a
-rate-limited EMF failure metric, and JSON stdout logs kept by default.
+Long-lived container processes export logs on the SDK's background
+`BatchLogRecordProcessor` thread so requests never wait on network I/O. This
+module adds four container safeguards around that baseline. It caps `atexit`
+shutdown so a hung gateway cannot hold a stopping task past ECS `stopTimeout`,
+installs a `SIGTERM` handler so plain scripts run `atexit` flushes on stop,
+emits a rate-limited CloudWatch EMF failure metric, and keeps single-line JSON
+stdout logs enabled by default.
 """
 
 from __future__ import annotations
@@ -43,8 +44,8 @@ DEFAULT_SHUTDOWN_TIMEOUT_MS: Final[float] = 5000.0
 DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS: Final[str] = "5"
 FAILURE_SIGNAL_INTERVAL_SECONDS: Final[float] = 60.0
 
-# AWS Batch sets these in every job container. There are no semantic convention
-# names for Batch, so they go under the i_ai namespace.
+# AWS Batch sets these variables in every job container. OpenTelemetry defines no
+# semantic conventions for AWS Batch, so these attributes use the i_ai namespace.
 BATCH_ENV_TO_ATTRIBUTE: Final[dict[str, str]] = {
     "AWS_BATCH_JOB_ID": iai_attribute("aws.batch.job.id"),
     "AWS_BATCH_JOB_ATTEMPT": iai_attribute("aws.batch.job.attempt"),
@@ -53,14 +54,14 @@ BATCH_ENV_TO_ATTRIBUTE: Final[dict[str, str]] = {
 
 
 def is_container_runtime() -> bool:
-    """Return True on ECS (Fargate or EC2) or AWS Batch."""
+    """Return `True` when `ECS_CONTAINER_METADATA_URI_V4` or `AWS_BATCH_JOB_ID` is set."""
     return bool(
         os.environ.get("ECS_CONTAINER_METADATA_URI_V4", "").strip() or os.environ.get("AWS_BATCH_JOB_ID", "").strip()
     )
 
 
 def batch_resource_attributes() -> dict[str, AttributeValue]:
-    """Return AWS Batch job attributes for the variables that are set."""
+    """Map populated AWS Batch environment variables to `i_ai.aws.batch.*` resource attributes."""
     return {
         attribute: os.environ[env].strip()
         for env, attribute in BATCH_ENV_TO_ATTRIBUTE.items()
@@ -69,7 +70,16 @@ def batch_resource_attributes() -> dict[str, AttributeValue]:
 
 
 def _run_capped(target: Callable[[], object], timeout_seconds: float, *, name: str) -> bool:
-    """Run ``target`` on a daemon thread, waiting at most ``timeout_seconds``. Returns True if it finished."""
+    """Run `target` on a daemon thread and wait at most `timeout_seconds`.
+
+    SDK `force_flush` and `shutdown` calls can block past their own timeout
+    arguments on a hung connection. Running `target` on a daemon thread lets
+    the caller return and the interpreter exit once `timeout_seconds` elapses.
+
+    Returns:
+        `True` if `target` finished within `timeout_seconds`, or `False` if
+        the worker thread is still running.
+    """
     worker = threading.Thread(target=target, name=name, daemon=True)
     worker.start()
     worker.join(timeout_seconds)
@@ -77,28 +87,34 @@ def _run_capped(target: Callable[[], object], timeout_seconds: float, *, name: s
 
 
 def register_capped_shutdown(provider: LoggerProvider, timeout_seconds: float) -> None:
-    """Replace the SDK's unbounded ``atexit`` shutdown with one that waits at most ``timeout_seconds``.
+    """Replace the SDK's `atexit` hook with a daemon-thread shutdown capped at `timeout_seconds`.
 
-    The SDK waits up to 30 s for its export thread, longer than the default
-    ECS ``stopTimeout``. Shutdown runs on a daemon thread, so if it is still
-    blocked when the cap expires the interpreter exits without it and the
-    remaining queued logs are dropped (they are still on stdout).
+    The SDK's default `atexit` hook waits up to 30 seconds, which consumes or
+    exceeds the default ECS `stopTimeout` and leaves no time for application
+    cleanup. When `timeout_seconds` expires on a hung gateway, the interpreter
+    exits and drops any remaining queued OTLP logs while stdout retains its
+    copy.
     """
     unregister_sdk_atexit(provider)
     atexit.register(_run_capped, provider.shutdown, timeout_seconds, name="i-dot-ai-otel-shutdown")
 
 
 def flush_otel() -> bool:
-    """Export queued logs now, waiting at most ``I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`` (5 s by default).
+    """Flush queued OTLP logs now, capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`.
 
-    Call it when a server shuts down, for example after ``yield`` in a FastAPI
-    lifespan. Some servers end the process without running ``atexit`` (uvicorn
-    before 0.47, and uvicorn ``--workers``), so the exit flush never runs there.
+    Call this during server shutdown, such as after `yield` in a FastAPI
+    lifespan, when the server exits without running `atexit` hooks. `uvicorn`
+    before 0.47 and `uvicorn --workers` both skip `atexit`, so queued logs
+    would otherwise miss the gateway on task stop.
 
-    Returns True when the flush finished in time. Returns False when it timed
-    out or ``configure_otel()`` has not run. The SDK ignores its own flush
-    timeout, so the wait is capped here to keep a hung gateway from holding
-    the task past ECS ``stopTimeout``.
+    The flush runs on a daemon thread capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`,
+    which defaults to 5000 milliseconds, because the SDK can block past its own
+    `force_flush` timeout on a hung connection and stall ECS shutdown past
+    `stopTimeout`.
+
+    Returns:
+        `True` if the flush finished within the timeout, or `False` if it timed
+        out or `configure_otel` has not configured a `LoggerProvider`.
     """
     force_flush = getattr(get_logger_provider(), "force_flush", None)
     if force_flush is None:
@@ -108,19 +124,25 @@ def flush_otel() -> bool:
 
 
 def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
-    # Raising SystemExit unwinds the main thread, so ``finally`` blocks and ``atexit`` (our flush) run.
+    """Raise `SystemExit` with `128 + signum` so main-thread `finally` blocks and `atexit` hooks run."""
     sys.exit(128 + signum)
 
 
 def install_sigterm_handler() -> bool:
-    """Exit cleanly on SIGTERM when nothing else handles it. Returns True when installed.
+    """Install a `SIGTERM` handler that exits via `SystemExit` when no handler is set.
 
-    A handler that is already set is left in place. Without one, Python dies on
-    SIGTERM without running ``atexit``, so queued logs would be lost when ECS or
-    Batch stops the task. uvicorn 0.47 and later relies on this handler: after
-    its graceful shutdown it restores the previous handler and re-raises the
-    signal. Earlier uvicorn sets its own handler before importing the app, so
-    this one is skipped and the app must call :func:`flush_otel` itself.
+    Python's default `SIGTERM` disposition terminates the process without
+    running `atexit`, dropping queued logs when ECS or AWS Batch stops a task.
+    Python only allows registering signal handlers on the main thread, and this
+    function preserves any custom handler already installed. `uvicorn` 0.47 and
+    later restores this handler after graceful shutdown and re-raises
+    `SIGTERM`, whereas older `uvicorn` installs its own handler before
+    importing the app and requires calling `flush_otel` during lifespan
+    shutdown.
+
+    Returns:
+        `True` if the handler was installed, or `False` if called off the main
+        thread or when `SIGTERM` already has a non-default handler.
     """
     if threading.current_thread() is not threading.main_thread():
         return False
@@ -131,7 +153,12 @@ def install_sigterm_handler() -> bool:
 
 
 class EcsRuntime(Runtime):
-    """ECS on Fargate or EC2, and AWS Batch: background export, capped shutdown, stdout kept."""
+    """Configure OpenTelemetry for ECS on Fargate or EC2 and AWS Batch containers.
+
+    Exports logs on the SDK's background thread, reports export failures via a
+    rate-limited CloudWatch EMF metric, caps `atexit` shutdown, and installs a
+    `SIGTERM` handler for graceful exit.
+    """
 
     missing_endpoint_message = (
         "OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is not set; "
@@ -149,6 +176,8 @@ class EcsRuntime(Runtime):
     def apply_env_defaults(self, *, can_export: bool) -> None:
         super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
+        # Leave OTEL_EXPORTER_OTLP_LOGS_TIMEOUT unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
+        # because the signal-specific variable would otherwise shadow the caller's general timeout.
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS)
 

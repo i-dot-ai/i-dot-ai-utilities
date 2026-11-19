@@ -1,4 +1,4 @@
-"""Single-line JSON stdout logging, kept alongside OTLP as a fallback."""
+"""Format and attach single-line JSON stdout logging alongside OTLP export."""
 
 from __future__ import annotations
 
@@ -11,14 +11,21 @@ from typing import Any, Final
 from opentelemetry import trace
 from opentelemetry.sdk._logs import LoggingHandler
 
-# Attributes every ``LogRecord`` has; anything else on the record came from ``extra=``.
+# Standard LogRecord attributes that Python sets on every record. Any other attribute on vars(record)
+# came from extra={...} and is copied into the JSON payload.
 _RESERVED_RECORD_ATTRS: Final[frozenset[str]] = frozenset(
     {*vars(logging.LogRecord("", 0, "", 0, "", (), None)), "message", "asctime", "taskName"}
 )
 
 
 class JsonLineFormatter(logging.Formatter):
-    """Format each record as one JSON object on one line, so ``awslogs`` keeps it as one event."""
+    """Serialize each log record as a single-line JSON object so `awslogs` keeps multi-line tracebacks in one event.
+
+    Emits `timestamp`, `level`, `logger`, and `message` on every record, adds
+    hex `trace_id` and `span_id` when an OpenTelemetry span is active, copies
+    all `extra` attributes, and serializes `exc_info` into `exception` with
+    escaped newlines.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -40,7 +47,12 @@ class JsonLineFormatter(logging.Formatter):
 
 
 class JsonStdoutHandler(logging.StreamHandler):  # type: ignore[type-arg]
-    """Stdout handler that writes :class:`JsonLineFormatter` lines."""
+    """Stream JSON log lines to `sys.stdout` instead of `StreamHandler`'s default `sys.stderr`.
+
+    Binding `sys.stdout` on a distinct `StreamHandler` subclass keeps fallback
+    application logs on the same stream as EMF metrics and lets callers tell
+    this handler apart from application console handlers.
+    """
 
     def __init__(self) -> None:
         super().__init__(sys.stdout)
@@ -48,10 +60,15 @@ class JsonStdoutHandler(logging.StreamHandler):  # type: ignore[type-arg]
 
 
 def install_stdout_handler() -> JsonStdoutHandler | None:
-    """Add a JSON stdout handler to the root logger unless the app already has its own.
+    """Attach `JsonStdoutHandler` to the root logger when no application handler is present.
 
-    Any non-OpenTelemetry handler already on the root logger counts as the
-    application's own console logging, so it is left alone and nothing is added.
+    Any existing root handler other than OpenTelemetry's `LoggingHandler`
+    indicates that the application already configured its own output, so this
+    function leaves the root logger unchanged to avoid duplicate stdout lines.
+
+    Returns:
+        The attached `JsonStdoutHandler`, or `None` if the root logger already
+        has a non-OpenTelemetry handler.
     """
     root = logging.getLogger()
     if any(not isinstance(handler, LoggingHandler) for handler in root.handlers):
