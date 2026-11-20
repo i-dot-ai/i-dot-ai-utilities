@@ -219,7 +219,7 @@ configure_otel_for_django(
 
 Dev (OTel PoC) endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT=https://search-i-dot-ai-dev-otel-poc-ekysqcfxvnh6touzvaf4dqa7ju.eu-west-2.es.amazonaws.com`
 
-After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. For Lambda/Batch use `configure_otel_for_lambda` and `force_flush_otel()` before exit.
+After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. Legacy callers on this bridge path can also call `configure_otel_for_lambda` and `force_flush_otel()` before exit; new Python Lambdas targeting `otel-gateway` should use the native `i_dot_ai_utilities.otel` section at the bottom of this guide instead.
 
 If you forget to call `configure_otel_for_django` at startup, `StructuredLoggingMiddlewareOTel` emits a loud one-shot WARNING at worker boot (`structured_logging_middleware_otel_tracer_provider_missing`) pointing straight at the fix, so the degraded "no trace ids on logs" state is visible immediately rather than showing up as silent absence.
 
@@ -412,3 +412,13 @@ The middleware lifts the hardening that used to live inside the deleted `DjangoE
 ### Settings
 
 `DjangoUserIdMiddleware` honours the same `I_DOT_AI_LOGGER` and `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` settings as `StructuredLoggingMiddlewareOTel`; no additional configuration is required.
+
+<br>
+
+***
+
+<br>
+
+## OpenTelemetry-native logging (`i_dot_ai_utilities.otel`)
+
+The OpenTelemetry-native path for Lambda, ECS, AWS Batch and FastAPI, including the `i_ai` attribute naming rules, is documented in the [otel readme](../otel/README.md). It is separate from `StructuredLogger` and the middleware above.

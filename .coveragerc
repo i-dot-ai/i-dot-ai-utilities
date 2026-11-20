@@ -2,6 +2,7 @@
 # Remove source since you're specifying it via --cov in command line
 omit =
     */tests/*
+    */__tests__/*
     */test_*
     src/i_dot_ai_utilities/file_store/settings.py
 
@@ -22,6 +23,7 @@ exclude_lines =
     # Don't complain if non-runnable code isn't run:
     if 0:
     if __name__ == .__main__.:
+    if TYPE_CHECKING:
 
     # Don't complain about abstract methods, they aren't run:
     @(abc\.)?abstractmethod
