@@ -26,6 +26,18 @@ from opentelemetry.distro import OpenTelemetryConfigurator
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.sdk._configuration import _overwrite_logging_config_fns
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk.environment_variables import (
+    OTEL_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LINK_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_SPAN_EVENT_COUNT_LIMIT,
+    OTEL_SPAN_LINK_COUNT_LIMIT,
+)
 from opentelemetry.sdk.resources import OTELResourceDetector
 
 from i_dot_ai_utilities.otel._attributes import AttributeNamespaceProcessor, warm_semconv_registry
@@ -41,6 +53,18 @@ _VALID_RUNTIMES: frozenset[RuntimeName] = frozenset({"lambda", "ecs", "local"})
 _INTERNAL_OTEL_LOGGER_PREFIX = "opentelemetry"
 _NOISY_LIBRARY_LOGGERS = ("botocore", "boto3", "urllib3")
 _ENVIRONMENT_ATTRIBUTE = "deployment.environment.name"
+_SDK_LIMIT_ENV_VARS = (
+    OTEL_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LINK_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT,
+    OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+    OTEL_SPAN_EVENT_COUNT_LIMIT,
+    OTEL_SPAN_LINK_COUNT_LIMIT,
+)
 
 
 @dataclass
@@ -183,8 +207,27 @@ def _resource_attributes(runtime: Runtime) -> dict[str, AttributeValue]:
     return attributes
 
 
+def _clear_invalid_limit_env_vars() -> None:
+    """Remove SDK attribute, span, and log limit variables that are not non-negative integers.
+
+    Clearing invalid values lets the fallback configuration succeed after the
+    SDK rejects a malformed limit variable.
+    """
+    for name in _SDK_LIMIT_ENV_VARS:
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            os.environ.pop(name, None)
+            continue
+        if value < 0:
+            os.environ.pop(name, None)
+
+
 def _configure_sdk(runtime: Runtime) -> None:
-    """Configure SDK providers, disabling OTLP export if the SDK rejects the exporter settings."""
+    """Configure SDK providers, disabling OTLP export if the SDK rejects the exporter or limit settings."""
 
     def _configure() -> None:
         OpenTelemetryConfigurator().configure(
@@ -197,16 +240,19 @@ def _configure_sdk(runtime: Runtime) -> None:
 
     try:
         _configure()
-    except RuntimeError as exc:
-        # OpenTelemetryConfigurator validates protocol names and installed exporter packages before
-        # setting any global provider, so calling _configure() again with exporters set to "none" is safe.
+    except (RuntimeError, ValueError) as exc:
+        # Protocol RuntimeErrors fail before any global provider is set. Limit ValueErrors can occur
+        # after tracer or meter providers are registered, so the fallback retry may log a benign
+        # provider-override warning while still configuring logging with OTLP export disabled.
+        protocol_hint = " http/protobuf is the only supported OTLP protocol." if isinstance(exc, RuntimeError) else ""
         _warn_once(
             "sdk_configuration",
             f"the OpenTelemetry SDK rejected the exporter settings ({exc}); continuing with export "
-            "disabled and logs on stdout only. http/protobuf is the only supported OTLP protocol.",
+            f"disabled and logs on stdout only.{protocol_hint}",
         )
         for name in (OTEL_LOGS_EXPORTER, OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER):
             os.environ[name] = "none"
+        _clear_invalid_limit_env_vars()
         _configure()
 
 

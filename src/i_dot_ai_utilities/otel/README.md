@@ -74,7 +74,7 @@ Every log line inside a request carries that request's `trace_id` and `span_id`.
 
 uvicorn's own server and access logs are not exported over OTLP. uvicorn turns off propagation on its `uvicorn` and `uvicorn.access` loggers, so they never reach the root handler and stay on uvicorn's console output only.
 
-Under gunicorn, keep `configure_otel()` at module level in the app module. With the default (no `--preload`), each worker imports the app and configures itself. With `--preload`, the SDK restarts its export thread in each worker after the fork. A uvicorn worker without `--preload` flushes its queued logs when gunicorn stops it (checked with gunicorn 27.0 and uvicorn 0.54). Unknown: whether sync workers and `--preload` workers do the same. Their logs are on stdout either way.
+Under gunicorn, keep `configure_otel()` at module level in the app module. With the default (no `--preload`), each worker imports the app and configures itself. With `--preload` (or Celery prefork workers), avoid emitting OTLP logs before `fork()` so the parent does not open TLS sockets before workers are spawned; `configure_otel()` resets failure-signal locks and closes pooled exporter transports after `fork()`, and the SDK restarts its export thread in each worker. A uvicorn worker without `--preload` flushes its queued logs when gunicorn stops it (checked with gunicorn 27.0 and uvicorn 0.54). Unknown: whether sync workers and `--preload` workers do the same. Their logs are on stdout either way.
 
 ### Flush logs on shutdown
 
@@ -198,7 +198,7 @@ Build each name once, as a module-level constant, as the examples above do. A ba
 
 Every log record is checked, whether or not the helpers were used. A non-compliant key is renamed to `i_ai.unnamespaced.<key>` before export, and a warning naming the key is written to stderr once per process. No data is lost, and offending keys are easy to find in the backend. The stdout copy of a log keeps the original key.
 
-Set `I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true` in tests or CI to raise `ValueError` from the logging call instead. It works with export off (`OTEL_LOGS_EXPORTER=none`), which is how most test suites run.
+Set `I_DOT_AI_OTEL_STRICT_ATTRIBUTES=true` in tests or CI to raise `ValueError` from the logging call instead. It works with export off (`OTEL_LOGS_EXPORTER=none`), which is how most test suites run. Known third-party framework loggers (such as `django.request`, which attaches `status_code` and `request`) are still renamed to `i_ai.unnamespaced.*` instead of raising so framework logs do not break test suites.
 
 On Lambda, the runtime adds `aws_request_id` to every record. It is exported as the semantic convention `faas.invocation_id`.
 
@@ -243,6 +243,7 @@ The environment wins because the gateway's `filter/service_allowlist` processor 
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport. `http/protobuf` is the only supported value |
 | `OTEL_EXPORTER_OTLP_COMPRESSION` | `gzip` | OTLP request body compression (`gzip`, `deflate` or `none`) |
 | `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` | _(unset)_ | Logs-specific compression override |
+| `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` | `16384` (when `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` is unset) | Maximum characters per log attribute value, protecting Loki's 64 KiB structured metadata ceiling; traces longer than this lose their end in Grafana/Loki but stay complete on stdout |
 | `OTEL_EXPORTER_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers |
 | `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_ | Extra resource attributes, for example `service.namespace=casework` |
 | `ENVIRONMENT` | _(set by the service)_ | Default for `deployment.environment.name` |
@@ -267,6 +268,7 @@ On `lambda` and `ecs`, `OTEL_PYTHON_ID_GENERATOR` defaults to `xray` and `OTEL_P
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` | `5` (not set if `OTEL_EXPORTER_OTLP_TIMEOUT` is set) | Per-batch export timeout in seconds |
 | `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS` | `5000` | Longest time that shutdown, and each `flush_otel()` call, waits for queued logs to export |
+| `I_DOT_AI_OTEL_MAX_CONNECTION_AGE_SECONDS` | `300` | Interval in seconds after which pooled HTTP keep-alive connections are closed so active ECS tasks rebalance behind the gateway NLB (`0` disables recycling) |
 | `OTEL_BLRP_SCHEDULE_DELAY` | `1000` (SDK default) | Background export interval in milliseconds |
 | `OTEL_BLRP_MAX_QUEUE_SIZE` | `2048` (SDK default) | Records buffered before the oldest are dropped |
 
@@ -319,7 +321,7 @@ When an export fails, the library writes one JSON line to stdout that is also a 
 | `lambda` | `FunctionName` | Once per failed or skipped flush, so the alarm keeps firing for the whole outage |
 | `ecs` | `ServiceName` | At most once per 60 seconds per process |
 
-On Lambda, enable `export_failures_threshold = 0` on `modules/observability/lambda-alarms` to alert on it.
+On Lambda, enable `export_failures_threshold = 0` on `modules/observability/lambda-alarms` to alert on export failures in both `direct` and `extension` modes. That alarm sums the library's `ExportFailures` EMF metric and a metric filter on the collector extension's `"Exporting failed"` log lines (in `mode = "extension"`, the library exports to `localhost`, so gateway outages surface through the collector's log lines rather than the library metric).
 
 ### Containers (`ecs`)
 
@@ -327,10 +329,7 @@ Requests only add log records to a bounded in-memory queue; the SDK's background
 
 The SDK's own shutdown waits up to 30 seconds for the export thread. That is the whole default ECS `stopTimeout` (30 seconds), leaving no time for the application's own shutdown. `configure_otel()` replaces it with a shutdown capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`. `flush_otel()` uses the same cap, so a service that calls it can wait up to twice the cap while the gateway is hung: once in `flush_otel()` and once at exit. Keep that time plus your application's own shutdown time below the task's `stopTimeout`.
 
-The ECS Terraform module needs two follow-up changes for this to hold in production:
-
-- Set `awslogs` `mode = "non-blocking"` and a `max-buffer-size` explicitly, so stdout writes cannot stall if CloudWatch is unreachable. The module currently leaves `mode` to the account's `defaultLogDriverMode` setting (unknown).
-- Lower the module's `otel_gateway.logs_timeout` default from 20 seconds to about 5.
+The shared ECS Terraform module configures `awslogs` with `mode = "non-blocking"` and `max-buffer-size = "25m"` so stdout writes cannot stall if CloudWatch is unreachable, and both the ECS and Batch modules default `otel_gateway.logs_timeout` to `5` seconds to match the shutdown cap.
 
 ### Lambda
 

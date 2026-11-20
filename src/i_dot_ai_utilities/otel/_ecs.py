@@ -28,7 +28,10 @@ from opentelemetry.sdk.extension.aws.resource import AwsEcsResourceDetector
 from i_dot_ai_utilities.otel._attributes import iai_attribute
 from i_dot_ai_utilities.otel._emf import RateLimitedFailureSignal
 from i_dot_ai_utilities.otel._environment import env_number, is_container_runtime
-from i_dot_ai_utilities.otel._export import FailureReportingExporter
+from i_dot_ai_utilities.otel._export import (
+    FailureReportingExporter,
+    resolve_max_connection_age_seconds,
+)
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
 
 if TYPE_CHECKING:
@@ -180,7 +183,13 @@ class EcsRuntime(Runtime):
         return attributes
 
     def log_record_processor(self, exporter: LogRecordExporter) -> LogRecordProcessor:
-        return super().log_record_processor(FailureReportingExporter(exporter, self.failure_signal))
+        return super().log_record_processor(
+            FailureReportingExporter(
+                exporter,
+                self.failure_signal,
+                max_connection_age_seconds=resolve_max_connection_age_seconds(),
+            )
+        )
 
     def post_configure(self, provider: LoggerProvider) -> None:
         timeout_ms = env_number(ENV_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS)

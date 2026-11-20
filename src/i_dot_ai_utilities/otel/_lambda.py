@@ -45,6 +45,10 @@ if TYPE_CHECKING:
 
 ENV_FLUSH_MARGIN_MS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS"
 DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
+# Give worker.join a small buffer beyond the HTTP timeout for thread start,
+# protobuf encoding, and gzip so real HTTP timeouts finish cleanly instead of
+# racing worker.join and stranding an in-flight thread.
+FLUSH_JOIN_OVERHEAD_MS: Final[int] = 100
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
 DEFAULT_LAMBDA_MAX_QUEUE_SIZE: Final[str] = "2048"
@@ -189,13 +193,13 @@ def flush_lambda_logs(  # noqa: PLR0911
     if not active_processors or not any(proc.has_pending for proc in active_processors):
         return True
 
+    if _inflight_flush is not None and _inflight_flush.is_alive():
+        failure_emitter("flush_in_progress")
+        return False
+
     if breaker.is_open():
         # Emit ExportFailures on every skipped flush so CloudWatch alarms stay active throughout an outage.
         failure_emitter("breaker_open")
-        return False
-
-    if _inflight_flush is not None and _inflight_flush.is_alive():
-        failure_emitter("flush_in_progress")
         return False
 
     timeout_ms = resolve_logs_export_timeout_ms()
@@ -214,17 +218,26 @@ def flush_lambda_logs(  # noqa: PLR0911
         daemon=True,
     )
     worker.start()
-    worker.join(timeout_ms / 1000)
+    join_overhead_ms = min(FLUSH_JOIN_OVERHEAD_MS, margin_ms // 2) if margin_ms > 0 else 0
+    worker.join((timeout_ms + join_overhead_ms) / 1000)
 
     if worker.is_alive():
-        # Track the stuck worker thread so subsequent invocations skip flushing until it finishes on a later thaw.
+        # Track the stuck worker so subsequent invocations skip flushing while it is still
+        # running, and open the breaker immediately. If the worker finishes late with a
+        # successful export on a later thaw, _export_batch closes the breaker again.
         _inflight_flush = worker
+        breaker.record_failure()
         failure_emitter("flush_timeout")
         return False
 
     flushed = outcome.get("flushed", False)
     exporter_failed = any(proc.consume_export_failure() for proc in active_processors)
+    deadline_exceeded = any(proc.consume_deadline_exceeded() for proc in active_processors)
     if not flushed or exporter_failed:
+        if deadline_exceeded and not exporter_failed:
+            # All attempted batches succeeded before the per-flush deadline elapsed.
+            # Leave the remaining backlog queued for the next invocation without tripping the breaker.
+            return False
         if not exporter_failed:
             breaker.record_failure()
         reason = "export_failure" if exporter_failed else "flush_failure"

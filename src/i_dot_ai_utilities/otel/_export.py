@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 import time
+import weakref
 from collections import deque
 from copy import copy
 from typing import TYPE_CHECKING, Final
@@ -29,6 +31,8 @@ if TYPE_CHECKING:
 
 ENV_CIRCUIT_BREAKER_SECONDS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS"
 DEFAULT_CIRCUIT_BREAKER_SECONDS: Final[float] = 30.0
+ENV_MAX_CONNECTION_AGE_SECONDS: Final[str] = "I_DOT_AI_OTEL_MAX_CONNECTION_AGE_SECONDS"
+DEFAULT_MAX_CONNECTION_AGE_SECONDS: Final[float] = 300.0
 DEFAULT_LAMBDA_QUEUE_SIZE: Final[int] = 2048
 DEFAULT_LAMBDA_EXPORT_BATCH_SIZE: Final[int] = 512
 
@@ -48,6 +52,28 @@ def _resolve_positive_int(name: str, default: int) -> int:
 def resolve_circuit_breaker_seconds() -> float:
     """Read `I_DOT_AI_OTEL_LAMBDA_CIRCUIT_BREAKER_SECONDS`, defaulting to 30.0 seconds."""
     return env_number(ENV_CIRCUIT_BREAKER_SECONDS, DEFAULT_CIRCUIT_BREAKER_SECONDS)
+
+
+def resolve_max_connection_age_seconds() -> float:
+    """Read `I_DOT_AI_OTEL_MAX_CONNECTION_AGE_SECONDS`, defaulting to 300.0 seconds.
+
+    Set to `0` to disable periodic HTTP connection recycling.
+    """
+    return env_number(ENV_MAX_CONNECTION_AGE_SECONDS, DEFAULT_MAX_CONNECTION_AGE_SECONDS)
+
+
+def close_exporter_transport(exporter: LogRecordExporter) -> None:
+    """Close pooled HTTP connections held by `exporter` so the next export opens a fresh socket.
+
+    `requests.Session.close()` closes idle sockets in its connection pool while
+    remaining usable for subsequent requests.
+    """
+    client = getattr(exporter, "_client", None)
+    transport = getattr(client, "_transport", None)
+    close = getattr(transport, "close", None)
+    if callable(close):
+        with contextlib.suppress(Exception):
+            close()
 
 
 class ExportCircuitBreaker:
@@ -96,15 +122,55 @@ class FailureReportingExporter(LogRecordExporter):
 
     Long-running container runtimes export on the SDK's background thread
     outside the request path, so they report failures and let the SDK retry
-    rather than opening a circuit breaker.
+    rather than opening a circuit breaker. When `max_connection_age_seconds` is
+    positive, this exporter periodically closes the underlying HTTP transport
+    so active HTTP/1.1 keep-alive connections behind an L4 NLB rebalance across
+    newly scaled-out collector tasks. It also closes any inherited transport
+    after `os.fork()` so preforked workers do not share TLS sockets.
     """
 
-    def __init__(self, delegate: LogRecordExporter, on_failure: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        delegate: LogRecordExporter,
+        on_failure: Callable[[str], None],
+        *,
+        max_connection_age_seconds: float = 0.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._delegate = delegate
         self._on_failure = on_failure
+        self._max_connection_age_seconds = max(max_connection_age_seconds, 0.0)
+        self._clock = clock
+        self._connection_opened_at: float | None = None
+        if hasattr(os, "register_at_fork"):
+            weak_self = weakref.ref(self)
+
+            def _after_fork() -> None:
+                instance = weak_self()
+                if instance is not None:
+                    # Use a weak reference so register_at_fork does not pin exporter instances forever.
+                    instance._reset_after_fork()  # noqa: SLF001
+
+            os.register_at_fork(after_in_child=_after_fork)
+
+    def _reset_after_fork(self) -> None:
+        close_exporter_transport(self._delegate)
+        self._connection_opened_at = None
+
+    def _maybe_recycle_connection(self) -> None:
+        if self._max_connection_age_seconds <= 0.0:
+            return
+        now = self._clock()
+        if self._connection_opened_at is None:
+            self._connection_opened_at = now
+            return
+        if (now - self._connection_opened_at) >= self._max_connection_age_seconds:
+            close_exporter_transport(self._delegate)
+            self._connection_opened_at = now
 
     def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
         """Export `batch` through the delegate, converting uncaught exceptions into `FAILURE`."""
+        self._maybe_recycle_connection()
         try:
             result = self._delegate.export(batch)
         except Exception:  # noqa: BLE001
@@ -134,16 +200,20 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
         self,
         exporter: LogRecordExporter,
         breaker: ExportCircuitBreaker,
+        *,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         max_queue_size = _resolve_positive_int(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_QUEUE_SIZE)
         max_batch_size = _resolve_positive_int(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_EXPORT_BATCH_SIZE)
         self._exporter = exporter
         self._breaker = breaker
+        self._clock = clock
         self._queue: deque[ReadableLogRecord] = deque(maxlen=max_queue_size)
         self._max_export_batch_size = min(max_batch_size, max_queue_size)
         self._export_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._failed_since_reset = False
+        self._deadline_exceeded = False
         self._shutdown = False
 
     @property
@@ -152,9 +222,10 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
         return bool(self._queue)
 
     def reset_export_window(self) -> None:
-        """Clear the per-flush failure flag before starting a synchronous Lambda flush."""
+        """Clear per-flush outcome flags before starting a synchronous Lambda flush."""
         with self._state_lock:
             self._failed_since_reset = False
+            self._deadline_exceeded = False
 
     def consume_export_failure(self) -> bool:
         """Return and clear whether any batch failed since the last `reset_export_window` call."""
@@ -162,6 +233,13 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
             failed = self._failed_since_reset
             self._failed_since_reset = False
             return failed
+
+    def consume_deadline_exceeded(self) -> bool:
+        """Return and clear whether `force_flush` stopped on its deadline since the last reset."""
+        with self._state_lock:
+            exceeded = self._deadline_exceeded
+            self._deadline_exceeded = False
+            return exceeded
 
     def on_emit(self, log_record: ReadWriteLogRecord) -> None:
         """Convert `log_record` to a `ReadableLogRecord` and enqueue it, evicting the oldest entry if full."""
@@ -196,15 +274,20 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
         self._breaker.record_failure()
         return False
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002
-        """Drain queued batches in FIFO order, stopping immediately if the circuit breaker opens."""
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        """Drain queued batches in FIFO order until empty, the breaker opens, or `timeout_millis` elapses."""
         if self._shutdown:
             return False
+        deadline = self._clock() + max(timeout_millis, 0) / 1000.0
         with self._export_lock:
             while self._queue:
                 # Fail remaining batches once the breaker opens so an outage costs at most
                 # one exporter timeout per invocation rather than one per queued batch.
                 if self._breaker.is_open():
+                    return False
+                if self._clock() >= deadline:
+                    with self._state_lock:
+                        self._deadline_exceeded = True
                     return False
                 count = min(self._max_export_batch_size, len(self._queue))
                 batch = [self._queue.pop() for _ in range(count)]
@@ -221,9 +304,13 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
 
 __all__ = [
     "DEFAULT_CIRCUIT_BREAKER_SECONDS",
+    "DEFAULT_MAX_CONNECTION_AGE_SECONDS",
     "ENV_CIRCUIT_BREAKER_SECONDS",
+    "ENV_MAX_CONNECTION_AGE_SECONDS",
     "ExportCircuitBreaker",
     "FailureReportingExporter",
     "LambdaLogRecordProcessor",
+    "close_exporter_transport",
     "resolve_circuit_breaker_seconds",
+    "resolve_max_connection_age_seconds",
 ]

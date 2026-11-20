@@ -589,3 +589,92 @@ class TestSdkInternals:
             assert callable(provider._at_exit_handler)
         finally:
             provider.shutdown()
+
+    def test_otlp_log_exporter_exposes_closeable_transport_for_recycling_and_fork_safety(self) -> None:
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter  # noqa: PLC0415
+
+        exporter = OTLPLogExporter(endpoint="http://127.0.0.1:4318/v1/logs")
+        try:
+            assert callable(exporter._client._transport.close)
+        finally:
+            exporter.shutdown()
+
+
+class TestFailSoftConfigurationAndLimits:
+    """Invalid exporter or SDK limit env vars fall back to stdout, and oversized attributes are bounded by default."""
+
+    @pytest.mark.parametrize(
+        ("env_var", "bad_value"),
+        [
+            pytest.param("OTEL_BLRP_MAX_QUEUE_SIZE", "-5", id="negative-blrp-queue"),
+            pytest.param("OTEL_ATTRIBUTE_COUNT_LIMIT", "not-an-int", id="invalid-attribute-count-limit"),
+            pytest.param(
+                "OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+                "not-an-int",
+                id="invalid-logrecord-attr-length-limit",
+            ),
+        ],
+    )
+    def test_invalid_sdk_value_errors_fall_back_to_stdout_without_crashing(
+        self,
+        env_var: str,
+        bad_value: str,
+    ) -> None:
+        script = (
+            "import logging\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "configure_otel(service_name='svc')\n"
+            "logging.getLogger('app').info('still-logging')\n"
+        )
+        proc = _run_python(
+            script,
+            env_overrides={
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318",
+                env_var: bad_value,
+            },
+        )
+        assert "rejected the exporter settings" in proc.stderr
+        assert "http/protobuf is the only supported OTLP protocol" not in proc.stderr
+        (stdout_line,) = proc.stdout.splitlines()
+        assert json.loads(stdout_line)["message"] == "still-logging"
+
+    def test_defaults_logrecord_attribute_value_length_limit_to_16384_and_respects_overrides(self) -> None:
+        script = (
+            "import logging\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "provider = configure_otel(service_name='svc')\n"
+            "logging.getLogger('app').info('big', extra={'i_ai.test.payload': 'x' * 25000})\n"
+            "provider.force_flush()\n"
+        )
+        with OtlpCaptureServer() as server:
+            _run_python(
+                script,
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
+                },
+            )
+            assert len(server.log_records[0].attributes["i_ai.test.payload"]) == 16384
+
+        with OtlpCaptureServer() as server:
+            _run_python(
+                script,
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT": "100",
+                    "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
+                },
+            )
+            assert len(server.log_records[0].attributes["i_ai.test.payload"]) == 100
+
+        for general_limit in ("2000", "20000"):
+            with OtlpCaptureServer() as server:
+                _run_python(
+                    script,
+                    env_overrides={
+                        "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                        "OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT": general_limit,
+                        "I_DOT_AI_OTEL_KEEP_STDOUT_LOGS": "false",
+                    },
+                )
+                assert len(server.log_records[0].attributes["i_ai.test.payload"]) == int(general_limit)

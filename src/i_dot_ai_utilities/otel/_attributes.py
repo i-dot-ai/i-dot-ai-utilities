@@ -21,6 +21,24 @@ if TYPE_CHECKING:
 I_AI_NAMESPACE: Final[str] = "i_ai"
 UNNAMESPACED_PREFIX: Final[str] = f"{I_AI_NAMESPACE}.unnamespaced."
 ENV_STRICT_ATTRIBUTES: Final[str] = "I_DOT_AI_OTEL_STRICT_ATTRIBUTES"
+# Third-party framework loggers such as django.request attach unnamespaced
+# extra keys outside application control. Rename them under i_ai.unnamespaced.*
+# even in strict mode so framework logs do not crash test suites.
+_THIRD_PARTY_STRICT_EXEMPT_LOGGERS: Final[tuple[str, ...]] = (
+    "aiohttp",
+    "alembic",
+    "boto3",
+    "botocore",
+    "celery",
+    "django",
+    "flask",
+    "gunicorn",
+    "httpx",
+    "sqlalchemy",
+    "urllib3",
+    "uvicorn",
+    "werkzeug",
+)
 # AWS Lambda's built-in logging handler injects aws_request_id onto every record.
 _LAMBDA_REQUEST_ID_KEY: Final[str] = "aws_request_id"
 _INVOCATION_ID_ATTRIBUTE: Final[str] = "faas.invocation_id"
@@ -156,6 +174,15 @@ def validate_attributes(attributes: Mapping[str, Any]) -> dict[str, Any]:
     return dict(attributes)
 
 
+def _is_strict_exempt_logger(log_record: ReadWriteLogRecord) -> bool:
+    """Return `True` when `log_record` originates from a known third-party framework logger."""
+    scope = getattr(log_record, "instrumentation_scope", None)
+    logger_name = getattr(scope, "name", None) or ""
+    return any(
+        logger_name == prefix or logger_name.startswith(f"{prefix}.") for prefix in _THIRD_PARTY_STRICT_EXEMPT_LOGGERS
+    )
+
+
 class AttributeNamespaceProcessor(LogRecordProcessor):
     """Normalize and enforce attribute namespaces on every emitted SDK log record.
 
@@ -164,6 +191,8 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
     still catches invalid keys in tests when `OTEL_LOGS_EXPORTER=none`. Moves
     non-compliant keys under `i_ai.unnamespaced.*` rather than dropping them so
     log fields stay intact while warning once per offending key on `stderr`.
+    Renames keys from known third-party framework loggers such as
+    `django.request` instead of raising in strict mode.
     """
 
     def __init__(self) -> None:
@@ -181,7 +210,7 @@ class AttributeNamespaceProcessor(LogRecordProcessor):
                     attributes[_INVOCATION_ID_ATTRIBUTE] = request_id  # type: ignore[index]
             invalid = [key for key in attributes if not is_valid_attribute_name(key)]
             if invalid:
-                if self._strict:
+                if self._strict and not _is_strict_exempt_logger(log_record):
                     validate_attributes(attributes)
                 for key in invalid:
                     value = attributes[key]

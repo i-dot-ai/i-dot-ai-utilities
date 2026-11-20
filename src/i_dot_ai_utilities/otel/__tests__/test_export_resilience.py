@@ -225,6 +225,38 @@ class TestLambdaLogRecordProcessor:
             test_logger.removeHandler(handler)
             processor.shutdown()
 
+    def test_force_flush_enforces_deadline_across_multi_batch_drain(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Multi-batch drains stop once timeout_millis elapses and keep unsent records queued."""
+        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "2")
+        clock = FakeClock(10.0)
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
+
+        class _SlowBatchExporter(ControllableLogExporter):
+            def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+                clock.advance(0.6)
+                return super().export(batch)
+
+        delegate = _SlowBatchExporter(result=LogRecordExportResult.SUCCESS)
+        processor = LambdaLogRecordProcessor(delegate, breaker, clock=clock)
+        try:
+            for idx in range(6):
+                processor.on_emit(ReadWriteLogRecord(LogRecord(body=f"record-{idx}")))
+
+            # 1000 ms budget allows batch 1 (0.6s) and batch 2 (1.2s total), then stops before batch 3.
+            assert processor.force_flush(timeout_millis=1000) is False
+            assert len(delegate.batches) == 2
+            assert processor.has_pending is True
+
+            # Remaining records drain on the next flush.
+            assert processor.force_flush(timeout_millis=1000) is True
+            assert len(delegate.batches) == 3
+            assert processor.has_pending is False
+        finally:
+            processor.shutdown()
+
 
 class TestFailureReportingExporter:
     """Container runtimes wrap the background exporter so failed batches trigger the EMF signal."""
@@ -252,6 +284,42 @@ class TestFailureReportingExporter:
         assert exporter.force_flush() is False
         exporter.shutdown()
         assert delegate.shutdown_called is True
+
+    def test_recycles_http_transport_when_max_connection_age_elapses_and_after_fork(self) -> None:
+        clock = FakeClock(100.0)
+        closed_count = 0
+
+        class _FakeTransport:
+            @staticmethod
+            def close() -> None:
+                nonlocal closed_count
+                closed_count += 1
+
+        class _FakeClient:
+            _transport = _FakeTransport()
+
+        delegate = ControllableLogExporter(result=LogRecordExportResult.SUCCESS)
+        delegate._client = _FakeClient()  # type: ignore[attr-defined] # noqa: SLF001
+        exporter = FailureReportingExporter(
+            delegate,
+            lambda _reason: None,
+            max_connection_age_seconds=300.0,
+            clock=clock,
+        )
+
+        assert exporter.export([]) is LogRecordExportResult.SUCCESS
+        assert closed_count == 0
+
+        clock.advance(299.0)
+        assert exporter.export([]) is LogRecordExportResult.SUCCESS
+        assert closed_count == 0
+
+        clock.advance(1.0)
+        assert exporter.export([]) is LogRecordExportResult.SUCCESS
+        assert closed_count == 1
+
+        exporter._reset_after_fork()  # noqa: SLF001
+        assert closed_count == 2
 
 
 class TestCloudWatchEmfSignals:
@@ -313,3 +381,12 @@ class TestCloudWatchEmfSignals:
         lines = capsys.readouterr().out.splitlines()
         assert len(lines) == 2
         assert [json.loads(line)["reason"] for line in lines] == ["export_failure", "export_failure"]
+
+    def test_container_failure_signal_resets_lock_after_fork(self, capsys: pytest.CaptureFixture[str]) -> None:
+        signal_ = RateLimitedFailureSignal(dimension="ServiceName", value="svc", interval_seconds=60.0)
+        # Simulate parent holding _lock at fork time; child's reset replaces the lock so it does not deadlock.
+        assert signal_._lock.acquire(blocking=False) is True  # noqa: SLF001
+        signal_._reset_after_fork()  # noqa: SLF001
+        signal_("export_failure")
+        lines = capsys.readouterr().out.splitlines()
+        assert len(lines) == 1

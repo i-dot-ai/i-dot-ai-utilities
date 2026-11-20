@@ -21,8 +21,10 @@ from opentelemetry.environment_variables import (
 )
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.environment_variables import (
+    OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT,
     OTEL_EXPORTER_OTLP_COMPRESSION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
 )
 
 from i_dot_ai_utilities.otel._environment import keep_stdout_logs, logs_export_disabled
@@ -34,16 +36,25 @@ if TYPE_CHECKING:
     from opentelemetry.util.types import AttributeValue
 
 RuntimeName = Literal["lambda", "ecs", "local"]
+DEFAULT_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT = "16384"
 
 
 def apply_common_env_defaults(*, logs_exporter: str) -> None:
-    """Set shared exporter, protocol, and compression defaults with `os.environ.setdefault` so caller variables win."""
+    """Set shared exporter, protocol, compression, and attribute limit defaults with `os.environ.setdefault`."""
     # Default traces and metrics exporters to "none" while otel-gateway runs a logs-only pipeline.
     os.environ.setdefault(OTEL_TRACES_EXPORTER, "none")
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "none")
     os.environ.setdefault(OTEL_LOGS_EXPORTER, logs_exporter)
     os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
     os.environ.setdefault(OTEL_EXPORTER_OTLP_COMPRESSION, "gzip")
+    # Cap individual log attribute values so one oversized field cannot exceed Loki's 64 KiB
+    # structured metadata limit. Leave the log-specific variable unset when
+    # OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT is set so it does not shadow the caller's value.
+    if not os.environ.get(OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT, "").strip():
+        os.environ.setdefault(
+            OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+            DEFAULT_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT,
+        )
 
 
 def apply_aws_trace_env_defaults() -> None:

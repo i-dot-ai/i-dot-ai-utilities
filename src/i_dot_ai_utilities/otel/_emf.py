@@ -7,9 +7,11 @@ Lambda and ECS `awslogs`, so one `ExportFailures` alarm covers both runtimes.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
+import weakref
 from typing import Final
 
 EMF_NAMESPACE: Final[str] = "i-dot-ai/otel"
@@ -61,6 +63,20 @@ class RateLimitedFailureSignal:
         self._value = value
         self._interval = interval_seconds
         self._last: float | None = None
+        self._lock = threading.Lock()
+        if hasattr(os, "register_at_fork"):
+            weak_self = weakref.ref(self)
+
+            def _after_fork() -> None:
+                instance = weak_self()
+                if instance is not None:
+                    # Use a weak reference so register_at_fork does not pin signal instances forever.
+                    instance._reset_after_fork()  # noqa: SLF001
+
+            os.register_at_fork(after_in_child=_after_fork)
+
+    def _reset_after_fork(self) -> None:
+        """Replace the lock after `os.fork()` so a child cannot inherit a locked mutex."""
         self._lock = threading.Lock()
 
     def __call__(self, reason: str) -> None:

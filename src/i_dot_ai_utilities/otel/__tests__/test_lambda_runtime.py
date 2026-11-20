@@ -9,11 +9,17 @@ import os
 import subprocess
 import sys
 import types
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from opentelemetry._logs import LogRecord
 from opentelemetry.sdk._logs import ReadWriteLogRecord
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from opentelemetry.sdk._logs import ReadableLogRecord
+    from opentelemetry.sdk._logs.export import LogRecordExportResult
 
 from i_dot_ai_utilities.otel import _lambda
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
@@ -456,6 +462,107 @@ class TestLambdaFlushBudget:
             processor.on_emit(ReadWriteLogRecord(LogRecord(body="second")))
             assert flush_lambda_logs(_StringTimeCtx(), processor=processor, breaker=breaker) is True
             assert [[r.log_record.body for r in batch] for batch in delegate.batches] == [["first"], ["second"]]
+        finally:
+            processor.shutdown()
+
+    def test_flush_timeout_opens_circuit_breaker_and_join_buffer_avoids_spurious_timeout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A worker thread that exceeds the join cap opens the breaker, while minor overhead completes cleanly."""
+        import threading  # noqa: PLC0415
+        import time  # noqa: PLC0415
+
+        monkeypatch.setattr(_lambda, "get_logger_provider", object)
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT", "0.05")
+        monkeypatch.setenv(ENV_FLUSH_MARGIN_MS, "250")
+
+        gate = threading.Event()
+
+        class _BlockingExporter(ControllableLogExporter):
+            def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+                gate.wait(timeout=2.0)
+                return super().export(batch)
+
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+        delegate = _BlockingExporter()
+        processor = LambdaLogRecordProcessor(delegate, breaker)
+        failures: list[str] = []
+        try:
+            processor.on_emit(ReadWriteLogRecord(LogRecord(body="stuck")))
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is False
+            )
+            assert failures == ["flush_timeout"]
+            assert breaker.is_open()
+        finally:
+            gate.set()
+            if _lambda._inflight_flush is not None:  # noqa: SLF001
+                _lambda._inflight_flush.join(timeout=1.0)  # noqa: SLF001
+            _lambda.reset_inflight_flush()
+            processor.shutdown()
+
+        # Export taking slightly longer than the 50 ms HTTP timeout still completes within the 100 ms join buffer.
+        class _SlightlySlowExporter(ControllableLogExporter):
+            def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+                time.sleep(0.07)
+                return super().export(batch)
+
+        breaker_ok = ExportCircuitBreaker(open_seconds=30.0, clock=FakeClock())
+        delegate_ok = _SlightlySlowExporter()
+        processor_ok = LambdaLogRecordProcessor(delegate_ok, breaker_ok)
+        failures_ok: list[str] = []
+        try:
+            processor_ok.on_emit(ReadWriteLogRecord(LogRecord(body="within-join-buffer")))
+            assert (
+                flush_lambda_logs(None, processor=processor_ok, breaker=breaker_ok, failure_emitter=failures_ok.append)
+                is True
+            )
+            assert failures_ok == []
+            assert not breaker_ok.is_open()
+            assert [rec.log_record.body for rec in delegate_ok.batches[0]] == ["within-join-buffer"]
+        finally:
+            processor_ok.shutdown()
+
+    def test_healthy_multi_batch_deadline_stop_keeps_breaker_closed_and_stays_quiet(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Stopping between healthy batches on deadline leaves the backlog queued without tripping the breaker."""
+        monkeypatch.setattr(_lambda, "get_logger_provider", object)
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_TIMEOUT", "0.3")
+        monkeypatch.setenv("OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "2")
+
+        clock = FakeClock()
+
+        class _SlowHealthyExporter(ControllableLogExporter):
+            def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+                clock.advance(0.11)
+                return super().export(batch)
+
+        breaker = ExportCircuitBreaker(open_seconds=30.0, clock=clock)
+        delegate = _SlowHealthyExporter()
+        processor = LambdaLogRecordProcessor(delegate, breaker, clock=clock)
+        failures: list[str] = []
+        try:
+            for i in range(8):
+                processor.on_emit(ReadWriteLogRecord(LogRecord(body=f"r{i}")))
+
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is False
+            )
+            assert len(delegate.batches) == 3
+            assert processor.has_pending is True
+            assert not breaker.is_open()
+            assert failures == []
+
+            # Next invocation drains the remaining batch cleanly without hitting breaker_open.
+            assert (
+                flush_lambda_logs(None, processor=processor, breaker=breaker, failure_emitter=failures.append) is True
+            )
+            assert len(delegate.batches) == 4
+            assert processor.has_pending is False
+            assert failures == []
         finally:
             processor.shutdown()
 

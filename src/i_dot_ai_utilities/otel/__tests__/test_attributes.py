@@ -137,6 +137,22 @@ class TestAttributeNamespaceProcessor:
         result = self._emit(processor, {"aws_request_id": "req-42", "i_ai.auth.application": "casework"})
         assert result == {"faas.invocation_id": "req-42", "i_ai.auth.application": "casework"}
 
+    def test_strict_mode_renames_third_party_framework_logger_keys_instead_of_raising(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Framework loggers such as ``django.request`` attach unnamespaced extra keys outside app control."""
+        from opentelemetry.sdk.util.instrumentation import InstrumentationScope  # noqa: PLC0415
+
+        monkeypatch.setenv(ENV_STRICT_ATTRIBUTES, "true")
+        processor = AttributeNamespaceProcessor()
+        record = ReadWriteLogRecord(
+            LogRecord(body="Not Found: /missing", attributes={"status_code": 404}),
+            instrumentation_scope=InstrumentationScope("django.request"),
+        )
+        processor.on_emit(record)
+        assert dict(record.log_record.attributes or {}) == {"i_ai.unnamespaced.status_code": 404}
+
     def test_deletes_invalid_key_before_renaming_so_bounded_attributes_do_not_evict_valid_keys(self) -> None:
         """``BoundedAttributes`` evicts the oldest entry on insert when full; deleting first preserves valid keys."""
         limits = LogRecordLimits(max_attributes=2)
