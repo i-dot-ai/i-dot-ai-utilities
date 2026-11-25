@@ -251,6 +251,7 @@ The environment takes precedence because the gateway's `filter/service_allowlist
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | _(unset)_ | Logs-specific endpoint override, used verbatim |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | _(unset)_ | Traces-specific endpoint override, used verbatim |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP transport. `http/protobuf` is the only supported value |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | `5` on `ecs`, `2` on `lambda` _(from Terraform)_ | Per-batch OTLP export timeout in seconds for logs and traces (overridden by `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` or `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`) |
 | `OTEL_EXPORTER_OTLP_COMPRESSION` | `gzip` | OTLP request body compression (`gzip`, `deflate`, or `none`) |
 | `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` | _(unset)_ | Logs-specific compression override |
 | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` | `16384` (when `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` is unset) | Maximum characters per log attribute value to protect Loki's 64 KiB structured metadata limit. Stack traces (tracebacks) longer than this lose their end in Grafana and Loki, but stay complete on stdout |
@@ -342,7 +343,7 @@ Application requests only append log records and spans to bounded in-memory queu
 
 The SDK's default `atexit` shutdown waits up to 30 seconds for each export thread, which consumes the entire default ECS `stopTimeout` (30 seconds) and leaves no time for application shutdown. `configure_otel()` replaces that hook with a shutdown capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`. `flush_otel()` uses the same cap, so a service that calls `flush_otel()` can wait up to twice the cap while the gateway is hung: once in `flush_otel()` and once at exit. Keep that combined time plus your application's own shutdown time below the task's `stopTimeout`.
 
-The shared ECS Terraform module configures `awslogs` with `mode = "non-blocking"` and `max-buffer-size = "25m"` so stdout writes cannot stall when CloudWatch is unreachable. Both the ECS and Batch Terraform modules default `otel_gateway.logs_timeout` to `5` seconds to match the shutdown cap.
+The shared ECS Terraform module configures `awslogs` with `mode = "non-blocking"` and `max-buffer-size = "25m"` so stdout writes cannot stall when CloudWatch is unreachable. Both the ECS and Batch Terraform modules default `otel_gateway.timeout` to `5` seconds to match the shutdown cap.
 
 ### Lambda
 
