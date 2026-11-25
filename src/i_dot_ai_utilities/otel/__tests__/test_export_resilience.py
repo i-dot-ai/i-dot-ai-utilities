@@ -16,6 +16,8 @@ from opentelemetry.sdk._logs.export import (
     LogRecordExportResult,
 )
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SpanExportResult
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from i_dot_ai_utilities.otel import _emf
 from i_dot_ai_utilities.otel.__tests__.conftest import ControllableLogExporter, FakeClock
@@ -34,7 +36,9 @@ from i_dot_ai_utilities.otel._emf import (
 from i_dot_ai_utilities.otel._export import (
     ExportCircuitBreaker,
     FailureReportingExporter,
+    FailureReportingSpanExporter,
     LambdaLogRecordProcessor,
+    LambdaSpanProcessor,
 )
 from i_dot_ai_utilities.otel._lambda import emit_lambda_export_failure, flush_lambda_logs
 
@@ -258,6 +262,55 @@ class TestLambdaLogRecordProcessor:
             processor.shutdown()
 
 
+class _FailingSpanExporter(InMemorySpanExporter):
+    def export(self, _spans: object) -> SpanExportResult:  # type: ignore[override]
+        return SpanExportResult.FAILURE
+
+
+class TestLambdaSpanProcessor:
+    """Spans queue until the invocation ends and share the log processor's breaker and flush rules."""
+
+    def test_queues_finished_spans_and_drains_them_in_fifo_order_on_force_flush(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = LambdaSpanProcessor(exporter, ExportCircuitBreaker())
+        provider = TracerProvider()
+        provider.add_span_processor(processor)
+        tracer = provider.get_tracer(__name__)
+
+        for name in ("first", "second"):
+            with tracer.start_as_current_span(name):
+                pass
+        assert processor.has_pending is True
+        assert exporter.get_finished_spans() == ()
+
+        assert provider.force_flush(1000) is True
+        assert [span.name for span in exporter.get_finished_spans()] == ["first", "second"]
+        assert processor.has_pending is False
+
+    def test_failed_export_records_failure_and_opens_shared_breaker(self) -> None:
+        breaker = ExportCircuitBreaker()
+        processor = LambdaSpanProcessor(_FailingSpanExporter(), breaker)
+        provider = TracerProvider()
+        provider.add_span_processor(processor)
+        with provider.get_tracer(__name__).start_as_current_span("span"):
+            pass
+
+        assert processor.force_flush(1000) is False
+        assert processor.consume_export_failure() is True
+        assert breaker.is_open() is True
+
+    def test_drops_spans_and_refuses_flush_after_shutdown(self) -> None:
+        processor = LambdaSpanProcessor(InMemorySpanExporter(), ExportCircuitBreaker())
+        provider = TracerProvider()
+        provider.add_span_processor(processor)
+        processor.shutdown()
+        with provider.get_tracer(__name__).start_as_current_span("span"):
+            pass
+
+        assert processor.has_pending is False
+        assert processor.force_flush(1000) is False
+
+
 class TestFailureReportingExporter:
     """Container runtimes wrap the background exporter so failed batches trigger the EMF signal."""
 
@@ -284,6 +337,24 @@ class TestFailureReportingExporter:
         assert exporter.force_flush() is False
         exporter.shutdown()
         assert delegate.shutdown_called is True
+
+    def test_span_exporter_invokes_failure_callback_on_failure_status_and_raised_exceptions(self) -> None:
+        reasons: list[str] = []
+
+        class _RaisingSpanExporter(InMemorySpanExporter):
+            def export(self, _spans: object) -> SpanExportResult:  # type: ignore[override]
+                raise RuntimeError
+
+        assert FailureReportingSpanExporter(_RaisingSpanExporter(), reasons.append).export([]) is (
+            SpanExportResult.FAILURE
+        )
+        assert FailureReportingSpanExporter(_FailingSpanExporter(), reasons.append).export([]) is (
+            SpanExportResult.FAILURE
+        )
+        assert FailureReportingSpanExporter(InMemorySpanExporter(), reasons.append).export([]) is (
+            SpanExportResult.SUCCESS
+        )
+        assert reasons == ["export_failure", "export_failure"]
 
     def test_recycles_http_transport_when_max_connection_age_elapses_and_after_fork(self) -> None:
         clock = FakeClock(100.0)

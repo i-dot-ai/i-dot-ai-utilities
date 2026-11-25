@@ -21,11 +21,15 @@ def is_container_runtime() -> bool:
     )
 
 
-def has_otlp_logs_endpoint() -> bool:
-    """Return `True` when `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty."""
-    return bool(
-        os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "").strip()
-        or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+def has_otlp_endpoint() -> bool:
+    """Return `True` when any OTLP exporter endpoint variable is non-empty."""
+    return any(
+        os.environ.get(name, "").strip()
+        for name in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        )
     )
 
 
@@ -74,7 +78,7 @@ __all__ = [
     "ENV_KEEP_STDOUT_LOGS_LAMBDA",
     "env_flag",
     "env_number",
-    "has_otlp_logs_endpoint",
+    "has_otlp_endpoint",
     "is_container_runtime",
     "keep_stdout_logs",
     "logs_export_disabled",

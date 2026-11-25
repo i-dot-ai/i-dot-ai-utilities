@@ -1,41 +1,75 @@
-# `i-dot-ai-utilities` Contributing Guide
+# `i-dot-ai-utilities` contributing guide
 
-## How to use uv
+## Use uv
 
-#### Docs can be found here -> https://docs.astral.sh/uv/
+`uv` is a Python version and package manager built in Rust by Astral (the creators of `ruff`). It replaces Poetry, pyenv, and virtualenv in a single tool. Read the [uv documentation](https://docs.astral.sh/uv/) for full command reference.
 
-`uv` is a python version and package manager that takes features similar to those you'd find in poetry, pyenv and virtualenv,
-and handles them all in one tool. It's built using Rust by Astral (same creators as `ruff`), so it runs far faster than comparable tools.
+Install `uv` using the [uv Homebrew formula](https://formulae.brew.sh/formula/uv). Change the install location if you do not want the default Homebrew prefix.
 
-Install it from [here](https://formulae.brew.sh/formula/uv) using brew. Be sure to change your install location from the default applications location.
+Update `uv` to the latest release:
 
-Update `uv` itself to latest with `uv self update`.
-
-Initialize `uv` into `.venv` by running `uv venv`.
-This venv will install all packages and the python version listed in the pyproject.toml file.
-This is the venv that will be used for this project only, no package or python versions need managing externally with `uv`.
-
-Active the venv with `source .venv/bin/activate`.
-
-Install packages from `pyproject.toml` using `uv pip install -e`.
-
-You can also activate and install packages to the venv by using `uv sync` in one command.
-
-To specify a particular python version you can use `uv venv --python 3.11` if needed.
-
-To regenerate the lockfile (`uv.lock`), you can use `uv lock`.
-
-Dependencies can be added with the following:
-
-``` bash
-uv add fastapi uvicorn         # Production dependencies
-uv add pytest black --dev      # Development dependencies
+```bash
+uv self update
 ```
 
-Scripts or tools can be run with the following:
+Create a project virtual environment in `.venv`:
 
-``` bash
-uv run python scratch.py      # Running a local script
-uv run ruff format            # Running ruff format
-uv run ruff check --fix       # Running ruff check
+```bash
+uv venv
+```
+
+To target a specific Python version, pass `--python`:
+
+```bash
+uv venv --python 3.11
+```
+
+Activate the virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Install the package and dependencies from `pyproject.toml` in editable mode:
+
+```bash
+uv pip install -e .
+```
+
+To create the virtual environment and install locked dependencies in one command, run:
+
+```bash
+uv sync
+```
+
+Regenerate the lockfile (`uv.lock`) after editing dependencies:
+
+```bash
+uv lock
+```
+
+Add production or development dependencies:
+
+```bash
+uv add fastapi uvicorn      # Production dependencies
+uv add pytest ruff --dev    # Development dependencies
+```
+
+Run scripts or tools inside the project environment:
+
+```bash
+uv run python scratch.py    # Run a local script
+uv run ruff format          # Format code with ruff
+uv run ruff check --fix     # Lint and auto-fix with ruff
+```
+
+## Run tests and linters
+
+Use the `Makefile` targets to test and lint changes before opening a pull request:
+
+```bash
+make test           # Start Docker Compose backing services and run all module test suites
+make test-logging   # Run only the logging module tests (no backing services required)
+make test-otel      # Run only the otel module tests (no backing services required)
+make lint           # Run ruff format, ruff check --fix, mypy, and bandit
 ```

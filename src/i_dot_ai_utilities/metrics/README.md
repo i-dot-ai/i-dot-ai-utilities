@@ -1,101 +1,95 @@
 # Metrics
 
-A library for writing time-series metrics to CloudWatch (which subsequently makes them available for graphing in Grafana). Emit your business and performance metrics with a few lines of code.
+`i_dot_ai_utilities.metrics` writes time-series metrics to CloudWatch so you can graph them in Grafana.
 
-The writer uses CloudWatch Embedded Metric Format, which is a specification developed by AWS to make the writing of time-series metrics trivial (as long as the code is running on AWS!). The formatted message is written to stdout and picked up by CloudWatch Logs for processing.
+`CloudwatchEmbeddedMetricsWriter` uses the AWS CloudWatch Embedded Metric Format (EMF). When your code runs on AWS, the writer prints each formatted metric payload to stdout, and CloudWatch Logs extracts the time-series metric automatically.
 
 ## Usage
 
-### Create a Metrics Writer
+### Create a metrics writer
 
-You can create the most basic version of the metrics writer by simply instantiating one with a few parameters:
+Instantiate `CloudwatchEmbeddedMetricsWriter` with a namespace, an environment name, and a `StructuredLogger` instance (used to log write failures):
+
 ```python
+import os
+
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.metrics.cloudwatch import CloudwatchEmbeddedMetricsWriter
 
+logger = StructuredLogger()
 metrics = CloudwatchEmbeddedMetricsWriter(
-    namespace=os.environ['REPO'],
-    environment=os.environ['ENVIRONMENT'],
+    namespace=os.environ["REPO"],
+    environment=os.environ["ENVIRONMENT"],
+    logger=logger,
 )
 
-...
-
-metric.put_metric(...) # See examples below
+metrics.put_metric(metric_name="successful_logins", value=1)
 ```
 
-The namespace is the storage location for the metrics, and should be the name of the app. This is combined with the environment name to create a metrics store for a given app and execution environment.
+Use your application name as `namespace`. The writer combines `namespace` and `environment` into `<namespace>/<environment>` to separate metrics by application and deployment environment.
 
-These two methods are enough to load time-series metrics into CloudWatch, for further graphing elsewhere in other tools (such as Grafana).
+Instantiating the writer and calling `put_metric()` is enough to publish time-series metrics to CloudWatch for graphing in Grafana.
 
-<br>
+To keep your code decoupled from the CloudWatch implementation, return the `MetricsWriter` interface from a factory function:
 
-***
-
-<br>
-
-You may also want to wrap instantiation inside an interface to make your code more modular in case other users want to swap out the underlying implementation in future. The library provides an interface for this for ease of use purposes (or you could create your own):
 ```python
+import os
+
+from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
 from i_dot_ai_utilities.metrics.cloudwatch import CloudwatchEmbeddedMetricsWriter
 from i_dot_ai_utilities.metrics.interfaces import MetricsWriter
 
+
 def get_metric_writer() -> MetricsWriter:
-    # This could also be a switch-case or factory class
+    logger = StructuredLogger()
     return CloudwatchEmbeddedMetricsWriter(
-        namespace=os.environ['REPO'],
-        environment=os.environ['ENVIRONMENT'],
+        namespace=os.environ["REPO"],
+        environment=os.environ["ENVIRONMENT"],
+        logger=logger,
     )
+
 
 metrics = get_metric_writer()
 ```
 
-<br>
+### Create metrics
 
-***
+A metric requires two arguments: `metric_name` (the identifier in CloudWatch) and `value` (an integer or float).
 
-<br>
+This example emits login counters. You can graph each counter with the `Sum` statistic to count events over a time period:
 
-### Creating Metrics
-
-Most simple metrics are made up of two elements - the name of the metric (which becomes its identifier in CloudWatch), and the metric value. The value is always numerical - either an integer or float.
-
-This example creates metric based on login success, incrementing the value by one each time. This counter can then be graphed with the 'Sum' statistic to get the number of logins for a given time period.
 ```python
-def login():
+def login() -> None:
     try:
-        # login happens
+        # Run login logic.
         metrics.put_metric(
-            name="successful_logins"
-            value=1
+            metric_name="successful_logins",
+            value=1,
         )
     except NotAuthorisedError:
-        # login unauthorised
         metrics.put_metric(
-            name="failed_logins"
-            value=1
+            metric_name="failed_logins",
+            value=1,
         )
     except Exception:
-        # an unhandled exception occurred
         metrics.put_metric(
-            name="unhandled_login_errors"
-            value=1
+            metric_name="unhandled_login_errors",
+            value=1,
         )
 ```
 
-<br>
+You can also emit duration metrics to measure operation performance. Graph these floats with statistics such as `Average` or `p95` to track and alert on latency:
 
-***
-
-<br>
-
-Time-based metrics can also be emitted to get the performance of business-level operations within the app. These floats can then be graphed with stats such as 'Average' or 'p95' to visualise and alert on how the service is performing in the context of a given operation or code path.
 ```python
+import time
+
 from i_dot_ai_utilities.metrics.unit import Unit
 
-def do_expensive_operation():
-    timer_start = datetime.datetime.now()
-    # Compute lots of things
-    timer_end = datetime.datetime.now()
 
-    timer_result_ms = (timer_end - timer_start).total_seconds() * 1000
+def do_expensive_operation() -> None:
+    timer_start = time.monotonic()
+    # Run the operation.
+    timer_result_ms = (time.monotonic() - timer_start) * 1000
 
     metrics.put_metric(
         metric_name="expensive_operation_duration_ms",
@@ -104,11 +98,11 @@ def do_expensive_operation():
     )
 ```
 
-### Adding Units
+### Add units
 
-Pass the `unit` argument to label a measurement. It defaults to `Unit.Count` (`"Count"`), so existing calls keep the same unit. Units do not convert the value: `unit=Unit.Seconds` expects a value already measured in seconds.
+Pass the `unit` argument to label a measurement. `unit` defaults to `Unit.Count` (`"Count"`). Units do not convert values: `unit=Unit.Seconds` expects a value already measured in seconds.
 
-Import `Unit` from `i_dot_ai_utilities.metrics.unit` ([unit.py](./unit.py)), with members such as `Unit.Seconds`, `Unit.Milliseconds`, `Unit.Percent`, and `Unit.CountsPerSecond`. For ratios or measurements without a supported unit, use `Unit.None_` (`"None"`). The CloudWatch writer also accepts strings matching [CloudWatch unit names](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_MetricDatum.html), case-insensitively. Invalid units are logged as write failures and no metric is emitted.
+Import `Unit` from `i_dot_ai_utilities.metrics.unit` ([unit.py](./unit.py)), which defines members such as `Unit.Seconds`, `Unit.Milliseconds`, `Unit.Percent`, and `Unit.CountsPerSecond`. For ratios or measurements without a supported unit, use `Unit.None_` (`"None"`). `CloudwatchEmbeddedMetricsWriter` also accepts strings matching [CloudWatch unit names](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_MetricDatum.html), case-insensitively. If you pass an invalid unit, the writer logs a write failure and emits no metric.
 
 ```python
 from i_dot_ai_utilities.metrics.unit import Unit
@@ -117,62 +111,45 @@ metrics.put_metric(metric_name="failure_rate", value=0.0, unit=Unit.None_)
 metrics.put_metric(metric_name="processing_time_seconds", value=1.5, unit=Unit.Seconds)
 ```
 
-<br>
+### Add dimensions
 
-***
+Most use cases need only metric names and values. When you need to break down a metric across a small, fixed set of categories, pass a `dimensions` dictionary.
 
-<br>
+**Use dimensions carefully.** CloudWatch creates a separate billable metric for every unique dimension value combination instead of appending to an existing series. High-cardinality values such as request IDs or GUIDs can create thousands of metrics and cause large CloudWatch bills. Contact the Platform team if you need advice before adding dimensions.
 
-### Adding Dimensions (Advanced Usage)
+This example uses a low-cardinality `Result` dimension to split outcomes of a single metric:
 
-For almost all use cases, the ability to write simple metrics will be enough for us to graph them and derive the information we need from them. However, it's also possible to add dimensions to a metric.
-
-**This should be used carefully**, as the use of high-cardinality values here (such as requestId, guid etc) will cause a new metric to be created within CloudWatch for each new dimension value (versus adding time-series data to an existing metric), which could cause a huge amount of unique metrics to be stored by Cloudwatch. This has very large cost implications. Speak to the Platform team if you want a hand with this feature.
-
-This example shows how a dimension might be added to allow for the breakdown of a single metric:
 ```python
-def process_serviceX_and_respond_to_user(request):
+def process_service_x_and_respond(request):
     try:
         response = do_something(request)
         metrics.put_metric(
-            metric_name="serviceX_processor_result",
+            metric_name="service_x_processor_result",
             value=1,
-            dimensions={
-                "Result": "Healthy"
-            }
+            dimensions={"Result": "Healthy"},
         )
         return response
     except ClientError:
         metrics.put_metric(
-            metric_name="serviceX_processor_result",
+            metric_name="service_x_processor_result",
             value=1,
-            dimensions={
-                "Result": "ClientError"
-            }
+            dimensions={"Result": "ClientError"},
         )
         return client_exception(code=400)
     except Exception:
         metrics.put_metric(
-            metric_name="serviceX_processor_result",
+            metric_name="service_x_processor_result",
             value=1,
-            dimensions={
-                "Result": "ServerError"
-            }
+            dimensions={"Result": "ServerError"},
         )
         return server_exception(code=500)
 ```
 
-As a rule-of-thumb, metrics collection in CloudWatch should have 'holistic' granularity, and the use of excessive dimensions should be avoided. If the analysis of high-cardinality metrics is required, it's better to use the structured logging library contained in this package to emit granular logs. These can then be analysed in OpenSearch, which is much more suited for fine-grained analysis.
+Keep CloudWatch metrics coarse-grained and limit the number of dimensions. When you need fine-grained, high-cardinality analysis, emit structured application logs through `i_dot_ai_utilities.otel` (see the [OpenTelemetry guide](../otel/README.md)) and query them in Grafana and Loki.
 
-<br>
+### Interpolate variables in metric names
 
-***
-
-<br>
-
-### Variable interpolation in metric names (Advanced Usage)
-
-It's also (naturally) possible to interpolate variables into the metric name, and you may want to do this in some cases (e.g. for DRYness).
+You can interpolate a variable into `metric_name` to share metric code across services:
 
 ```python
 metrics.put_metric(
@@ -181,4 +158,4 @@ metrics.put_metric(
 )
 ```
 
-In this case, the same warning for when using dimensions applies here - care should be taken to ensure the `service_name` variable (e.g.) can't spawn too many permutations, or it could cause an explosion in the amount of different metrics stored by CloudWatch.
+The same cardinality warning applies to dynamic metric names. Ensure that `service_name` comes from a small, bounded set of values so it cannot create an unbounded number of CloudWatch metrics.

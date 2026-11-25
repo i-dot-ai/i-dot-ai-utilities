@@ -1,145 +1,139 @@
-# i.AI Utility Code
+# i.AI utility code
 
-`i-dot-ai-utilities` is a python package used and developed by the i.AI team within DSIT.
-It provides common features used in many of our applications.
+`i-dot-ai-utilities` is a Python package developed and maintained by the i.AI team. It provides shared modules used across i.AI applications.
 
-## Installation
+## Install the package
 
-When installing the package, the base package comes with only the `logger` module, to install more use `extras`. The following extras are available:
+The base package includes only the `logging` module. Install optional extras to include additional modules:
 
-- auth
-- file_store
-- litellm
-- metrics
-- otel _(pre-release)_
-- otel_django _(pre-release)_
-- otel_fastapi _(pre-release)_
-- otel_native _(pre-release)_
-- otel_native_lambda _(pre-release)_
-- otel_native_botocore _(pre-release)_
-- otel_native_fastapi _(pre-release)_
-- django _(pre-release)_
-- all
+- `auth`
+- `file_store`
+- `litellm`
+- `metrics`
+- `otel_native` _(pre-release)_
+- `otel_native_lambda` _(pre-release)_
+- `otel_native_botocore` _(pre-release)_
+- `otel_native_fastapi` _(pre-release)_
+- `all` _(includes pre-release extras)_
 
-To install the package, use your package manager of choice:
+To install the base package or stable extras (`auth`, `file_store`, `litellm`, and `metrics`), run one of these commands:
 
 ```bash
-pip install "i-dot-ai-utilities[all]"
+pip install "i-dot-ai-utilities[auth]"
 
-poetry add "i-dot-ai-utilities[all]"
+poetry add "i-dot-ai-utilities[auth]"
 
-uv pip install "i-dot-ai-utilities[all]"
+uv pip install "i-dot-ai-utilities[auth]"
 ```
 
-Replace `[all]` with any extras from the list above, comma separated, or remove entirely to install just the base package.
+Replace `[auth]` with a comma-separated list of extras, or omit the brackets to install only the base `logging` module.
 
-> ⚠️ **The `otel*` and `django` extras are pre-release; pass `--pre` (or pin the exact pre-release version) to install them.** The `otel_native*` extras are the supported OpenTelemetry path (`i_dot_ai_utilities.otel`). The legacy `[otel]`, `[otel_django]`, `[otel_fastapi]`, and `[django]` extras belong to the older structlog bridge and will be removed. `[all]` pulls in the pre-release extras too, so it also requires `--pre` during the pre-release window.
+> **Pre-release extras:** The `otel*`, `django`, and `all` extras require pre-release installation (pass `--pre` with `pip`, `--allow-prereleases` with `poetry`, `--prerelease=allow` with `uv`, or pin the exact pre-release version). Use the `otel_native*` extras (`i_dot_ai_utilities.otel`) for new OpenTelemetry work. The legacy `otel`, `otel_django`, `otel_fastapi`, and `django` extras belong to the older structlog bridge and will be removed.
+
+To install a pre-release extra such as `otel_native_fastapi` or `all`:
+
+```bash
+pip install --pre "i-dot-ai-utilities[otel_native_fastapi]"
+
+poetry add --allow-prereleases "i-dot-ai-utilities[otel_native_fastapi]"
+
+uv pip install --prerelease=allow "i-dot-ai-utilities[otel_native_fastapi]"
+```
 
 ## Features
 
-### Current features:
+### Current features
 
-#### Structured Logging
+#### Structured logging
 
-The structured logging library is used to generate logs in a known format so they can be further processed into logging systems downstream. It also provides the ability to easily enrich log messages with useful data, and in some cases does this automatically.
+The `logging` module formats logs for downstream log pipelines and enriches log messages with runtime and request metadata.
 
-You can find information on usage of the logging library in the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+Read the [logging module README](./src/i_dot_ai_utilities/logging/README.md) for usage details.
 
-#### Metrics Collection
+#### Metrics collection
 
-The metrics collection library provides the ability to write time-series metrics out to useful destinations. In the case of i.AI, this is CloudWatch Metrics.
+The `metrics` module writes time-series metrics to CloudWatch Metrics using Embedded Metric Format (EMF). It also defines a `MetricsWriter` interface so you can swap implementations without changing caller code.
 
-There's also a handy interface provided which can be used in your code to allow for modularity if the swapping out of implementations is desired.
-
-You can find information on usage of the metrics collection library in the [metrics library readme](./src/i_dot_ai_utilities/metrics/README.md).
+Read the [metrics module README](./src/i_dot_ai_utilities/metrics/README.md) for usage details.
 
 #### File store
 
-The file store library currently only supports aws s3 as this is the main/only file store that we use in anger.
+The `file_store` module supports uploading and downloading files and generating download links. It currently targets AWS S3, with an interface designed for additional storage backends.
 
-It can be used to upload and download files, and generate file download links for end-users to use.
-
-The aim is to be able to plug more file storage destinations into this module so it can be swapped out easily.
-
-You can find out information on usage of the file store library in the [file store library readme](./src/i_dot_ai_utilities/file_store/README.md).
+Read the [file store module README](./src/i_dot_ai_utilities/file_store/README.md) for usage details.
 
 #### LiteLLM
 
-This library currently supports LLM proxy through LiteLLM, for chat and embedding functions.
+The `litellm` module wraps the LiteLLM proxy for chat and embedding calls so applications can switch proxy configurations without changing call sites. Ensure that your LiteLLM API key grants access to the models you request.
 
-The hope for this library is to easily swap between proxies for whichever is best-in-market at the time.
-
-As the end-user, you'll have to make sure that the API key issued to you by LiteLLM will support the models you're trying to use.
-
-More information on usage and setup can be found in the [litellm library readme](./src/i_dot_ai_utilities/litellm/README.md).
+Read the [LiteLLM module README](./src/i_dot_ai_utilities/litellm/README.md) for setup and usage details.
 
 #### OpenTelemetry
 
-Use `i_dot_ai_utilities.otel` for new work. Install `[otel_native]` plus one extra per framework or platform (`[otel_native_lambda]`, `[otel_native_botocore]`, `[otel_native_fastapi]`), then call `configure_otel()` at start-up. It detects AWS Lambda, ECS (Fargate or EC2), AWS Batch or a local run, sends Python `logging` output to the `otel-gateway` over OTLP, auto-instruments installed libraries, and enforces the `i_ai` namespace for custom attributes.
+Use `i_dot_ai_utilities.otel` for new work. Install `[otel_native]` for plain containers or scripts, or install a platform extra (`[otel_native_lambda]`, `[otel_native_botocore]`, or `[otel_native_fastapi]`), which already includes `otel_native`. Call `configure_otel()` at startup. It detects AWS Lambda, ECS (Fargate or EC2), AWS Batch, or local runs, sends Python `logging` output and traces to `otel-gateway` over OTLP, enables installed instrumentation libraries, and enforces the `i_ai` namespace for custom attributes.
 
-You can find usage details in the [otel library readme](./src/i_dot_ai_utilities/otel/README.md).
+Read the [OpenTelemetry module README](./src/i_dot_ai_utilities/otel/README.md) for usage details.
 
-#### Legacy OpenTelemetry bridge & Django middleware
+#### Legacy OpenTelemetry bridge and Django middleware
 
-The `otel` extra (`i_dot_ai_utilities.logging.otel`) and the `django` middleware are the earlier structlog-based bridge. They are unchanged and will be removed; do not use them for new services. See the [logging library readme](./src/i_dot_ai_utilities/logging/README.md).
+The `otel` extra (`i_dot_ai_utilities.logging.otel`) and the `django` middleware belong to the earlier structlog-based bridge. They will be removed. Do not use them for new services. See the [logging module README](./src/i_dot_ai_utilities/logging/README.md) for existing consumers.
 
-### Future features:
+### Future features
 
-- authorisation
-- vector stores
+- Vector stores
 
-## How to use
+## Develop and test
 
-### Unit Testing
+### Run unit tests
 
-All modules contained within this repo include robust test suites. You can run tests for all modules in this package using `make test`.
+Every module in this repository includes a unit test suite. Run all module test suites with `make test`.
 
-Tests and linting runs on every push and merge to main.
+Tests and linting run on every push and merge to `main`.
 
-When making changes or adding tests, please ensure tests run in isolation, as failures of external dependencies will impact the CI tests for all packages. Please also make sure that tests pass before merging, as failing tests will impact every package in the application.
+Keep tests isolated so external dependency failures do not affect other modules in CI. Verify that all tests pass before merging.
 
-### CI/CD & Releases
+### CI and releases
 
-Package versions are published to PyPI by the `Publish python package` workflow. Version names must adhere to semantic versioning and must *not* be prefixed with a `v`. Merging to `main` does **not** publish anything; publishing is always a deliberate action.
+The `Publish python package` workflow publishes package versions to PyPI. Version tags must follow semantic versioning without a leading `v`. Merging to `main` does not publish a release. Publishing is always a manual action.
 
-There are three publish channels:
+Three publish channels exist:
 
 | Channel | How to trigger | Version stamped | Published to |
 |---|---|---|---|
-| **Stable release** | Create a GitHub Release, **not** marked as a pre-release | bare tag (e.g. `0.6.0`) | production PyPI |
-| **Pre-release → production** | Run the workflow manually (`Actions → Publish python package → Run workflow`) with `pypi=production` and an existing pre-release tag | tag verbatim (e.g. `0.6.0rc1`) | production PyPI |
-| **Pre-release → test** | Create a GitHub Release, marked as a pre-release | `<tag>.<timestamp>` | Test PyPI |
+| **Stable release** | Create a GitHub Release that is not marked as a pre-release | Bare tag (for example `0.6.0`) | Production PyPI |
+| **Pre-release to production** | Run the workflow manually (**Actions**, **Publish python package**, **Run workflow**) with `pypi=production` and an existing pre-release tag | Tag verbatim (for example `0.6.0rc1`) | Production PyPI |
+| **Pre-release to test** | Create a GitHub Release marked as a pre-release | `<tag>.<timestamp>` | Test PyPI |
 
-Notes:
+Notes on publishing:
 
-- **Manual dispatch is pre-release only.** The workflow rejects a manual `production` publish whose version is not a PEP 440 pre-release (an `rc` / `a` / `b` / `.dev` suffix). Cut stable releases through the GitHub Release flow.
-- **The tag must already exist before a manual dispatch.** The workflow checks out the tag you pass; create and push it first.
+- **Manual dispatch accepts pre-releases only.** The workflow rejects a manual `production` publish whose tag is not a PEP 440 pre-release (`rc`, `a`, `b`, or `.dev` suffix). Cut stable releases through the GitHub Release flow.
+- **The tag must exist before manual dispatch.** The workflow checks out the tag you specify, so create and push the tag first.
 
-#### Installing a pre-release
+#### Install a pre-release
 
-**From production PyPI** (pre-release → production channel): pip will not resolve a PEP 440 pre-release unless you opt in with `--pre` or pin the exact version, so ordinary consumers stay on the latest stable automatically.
-
-```bash
-# opt in to pre-releases (resolves the newest rc)
-pip install --pre "i-dot-ai-utilities[django,otel_django]"
-
-# or pin the exact pre-release version
-pip install "i-dot-ai-utilities[django,otel_django]==0.6.0rc1"
-```
-
-**From Test PyPI** (pre-release → test channel): point your installer at Test PyPI, provide production PyPI as a fallback index so runtime dependencies resolve, and pin the exact **timestamped** version the workflow generated (replace the version as required):
+**From production PyPI** (pre-release to production channel): `pip` ignores PEP 440 pre-releases unless you pass `--pre` or pin the exact version, so normal installs stay on the latest stable release.
 
 ```bash
-uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
+# Opt in to pre-releases (resolves the newest release candidate).
+pip install --pre "i-dot-ai-utilities[otel_native_fastapi]"
+
+# Pin the exact pre-release version.
+pip install "i-dot-ai-utilities[otel_native_fastapi]==0.6.0rc1"
 ```
 
-Or with pip:
+**From Test PyPI** (pre-release to test channel): point your installer at Test PyPI, keep production PyPI as a fallback index so runtime dependencies resolve, and pin the exact timestamped version generated by the workflow:
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[django,otel_django]==0.1.1rc202506301522"
+uv pip install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match "i-dot-ai-utilities[otel_native_fastapi]==0.1.1rc202506301522"
 ```
 
-`--pre` alone is not enough for the Test PyPI channel: the package only exists on Test PyPI, so you must also point the installer at that index (and keep production PyPI as a fallback for dependencies).
+Or with `pip`:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "i-dot-ai-utilities[otel_native_fastapi]==0.1.1rc202506301522"
+```
+
+`--pre` alone does not work for the Test PyPI channel because the package exists only on Test PyPI. You must specify the Test PyPI index and keep production PyPI as a fallback for dependencies.
 
 ## Licence
 

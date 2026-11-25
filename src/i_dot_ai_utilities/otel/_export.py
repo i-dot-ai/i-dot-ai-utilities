@@ -9,7 +9,7 @@ import time
 import weakref
 from collections import deque
 from copy import copy
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from opentelemetry.context import Context
 from opentelemetry.instrumentation.utils import suppress_instrumentation
@@ -21,8 +21,12 @@ from opentelemetry.sdk._logs.export import (
 from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
     OTEL_BLRP_MAX_QUEUE_SIZE,
+    OTEL_BSP_MAX_EXPORT_BATCH_SIZE,
+    OTEL_BSP_MAX_QUEUE_SIZE,
 )
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from i_dot_ai_utilities.otel._environment import env_number
 
@@ -62,7 +66,7 @@ def resolve_max_connection_age_seconds() -> float:
     return env_number(ENV_MAX_CONNECTION_AGE_SECONDS, DEFAULT_MAX_CONNECTION_AGE_SECONDS)
 
 
-def close_exporter_transport(exporter: LogRecordExporter) -> None:
+def close_exporter_transport(exporter: object) -> None:
     """Close pooled HTTP connections held by `exporter` so the next export opens a fresh socket.
 
     `requests.Session.close()` closes idle sockets in its connection pool while
@@ -117,7 +121,7 @@ class ExportCircuitBreaker:
             self._open_until = self._clock() + self._open_seconds
 
 
-class FailureReportingExporter(LogRecordExporter):
+class _FailureReportingExporter:
     """Invoke `on_failure` whenever the delegate OTLP exporter returns `FAILURE` or raises.
 
     Long-running container runtimes export on the SDK's background thread
@@ -129,9 +133,11 @@ class FailureReportingExporter(LogRecordExporter):
     after `os.fork()` so preforked workers do not share TLS sockets.
     """
 
+    _result_type: ClassVar[Any]
+
     def __init__(
         self,
-        delegate: LogRecordExporter,
+        delegate: Any,
         on_failure: Callable[[str], None],
         *,
         max_connection_age_seconds: float = 0.0,
@@ -168,14 +174,14 @@ class FailureReportingExporter(LogRecordExporter):
             close_exporter_transport(self._delegate)
             self._connection_opened_at = now
 
-    def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+    def export(self, batch: Sequence[Any]) -> Any:
         """Export `batch` through the delegate, converting uncaught exceptions into `FAILURE`."""
         self._maybe_recycle_connection()
         try:
             result = self._delegate.export(batch)
         except Exception:  # noqa: BLE001
-            result = LogRecordExportResult.FAILURE
-        if result is not LogRecordExportResult.SUCCESS:
+            result = self._result_type.FAILURE
+        if result is not self._result_type.SUCCESS:
             self._on_failure("export_failure")
         return result
 
@@ -186,29 +192,45 @@ class FailureReportingExporter(LogRecordExporter):
         self._delegate.shutdown()
 
 
-class LambdaLogRecordProcessor(LogRecordProcessor):
-    """Buffer log records in a bounded deque and export synchronously at Lambda invocation boundaries.
+class FailureReportingExporter(_FailureReportingExporter, LogRecordExporter):
+    """Report failed OTLP log exports. See `_FailureReportingExporter`."""
 
-    Avoids `BatchLogRecordProcessor`'s background timer thread, which Lambda
+    _result_type = LogRecordExportResult
+
+
+class FailureReportingSpanExporter(_FailureReportingExporter, SpanExporter):
+    """Report failed OTLP span exports. See `_FailureReportingExporter`."""
+
+    _result_type = SpanExportResult
+
+
+class _LambdaExportProcessor:
+    """Buffer telemetry in a bounded deque and export synchronously at Lambda invocation boundaries.
+
+    Avoids the SDK batch processors' background timer thread, which Lambda
     freezes mid-flight between invocations and which would wake on batch-size
-    thresholds while `ExportCircuitBreaker` is open. `on_emit` appends directly
+    thresholds while `ExportCircuitBreaker` is open. Subclasses append directly
     to a bounded `collections.deque` without locks, and `force_flush` drains
     batches synchronously while respecting the circuit breaker.
     """
 
+    _result_type: ClassVar[Any]
+    _queue_size_env: ClassVar[str]
+    _batch_size_env: ClassVar[str]
+
     def __init__(
         self,
-        exporter: LogRecordExporter,
+        exporter: Any,
         breaker: ExportCircuitBreaker,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        max_queue_size = _resolve_positive_int(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_QUEUE_SIZE)
-        max_batch_size = _resolve_positive_int(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_EXPORT_BATCH_SIZE)
+        max_queue_size = _resolve_positive_int(self._queue_size_env, DEFAULT_LAMBDA_QUEUE_SIZE)
+        max_batch_size = _resolve_positive_int(self._batch_size_env, DEFAULT_LAMBDA_EXPORT_BATCH_SIZE)
         self._exporter = exporter
         self._breaker = breaker
         self._clock = clock
-        self._queue: deque[ReadableLogRecord] = deque(maxlen=max_queue_size)
+        self._queue: deque[Any] = deque(maxlen=max_queue_size)
         self._max_export_batch_size = min(max_batch_size, max_queue_size)
         self._export_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -218,7 +240,7 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
 
     @property
     def has_pending(self) -> bool:
-        """Return `True` when at least one record is waiting in the queue."""
+        """Return `True` when at least one item is waiting in the queue."""
         return bool(self._queue)
 
     def reset_export_window(self) -> None:
@@ -241,31 +263,14 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
             self._deadline_exceeded = False
             return exceeded
 
-    def on_emit(self, log_record: ReadWriteLogRecord) -> None:
-        """Convert `log_record` to a `ReadableLogRecord` and enqueue it, evicting the oldest entry if full."""
-        if self._shutdown:
-            return
-        resource = log_record.resource if log_record.resource is not None else Resource.create({})
-        # Shallow-copy the API record with an empty Context() so buffered records do not retain
-        # active span and request objects in memory across Lambda invocations.
-        api_log_record = copy(log_record.log_record)
-        api_log_record.context = Context()
-        readable = ReadableLogRecord(
-            log_record=api_log_record,
-            resource=resource,
-            instrumentation_scope=log_record.instrumentation_scope,
-            limits=log_record.limits,
-        )
-        self._queue.appendleft(readable)
-
-    def _export_batch(self, batch: Sequence[ReadableLogRecord]) -> bool:
+    def _export_batch(self, batch: Sequence[Any]) -> bool:
         with suppress_instrumentation():
             try:
                 result = self._exporter.export(batch)
             except Exception:  # noqa: BLE001
-                result = LogRecordExportResult.FAILURE
+                result = self._result_type.FAILURE
 
-        if result is LogRecordExportResult.SUCCESS:
+        if result is self._result_type.SUCCESS:
             self._breaker.record_success()
             return True
 
@@ -302,6 +307,47 @@ class LambdaLogRecordProcessor(LogRecordProcessor):
         self._exporter.shutdown()
 
 
+class LambdaLogRecordProcessor(_LambdaExportProcessor, LogRecordProcessor):
+    """Queue log records for the per-invocation Lambda flush. See `_LambdaExportProcessor`."""
+
+    _result_type = LogRecordExportResult
+    _queue_size_env = OTEL_BLRP_MAX_QUEUE_SIZE
+    _batch_size_env = OTEL_BLRP_MAX_EXPORT_BATCH_SIZE
+
+    def on_emit(self, log_record: ReadWriteLogRecord) -> None:
+        """Convert `log_record` to a `ReadableLogRecord` and enqueue it, evicting the oldest entry if full."""
+        if self._shutdown:
+            return
+        resource = log_record.resource if log_record.resource is not None else Resource.create({})
+        # Shallow-copy the API record with an empty Context() so buffered records do not retain
+        # active span and request objects in memory across Lambda invocations.
+        api_log_record = copy(log_record.log_record)
+        api_log_record.context = Context()
+        readable = ReadableLogRecord(
+            log_record=api_log_record,
+            resource=resource,
+            instrumentation_scope=log_record.instrumentation_scope,
+            limits=log_record.limits,
+        )
+        self._queue.appendleft(readable)
+
+
+class LambdaSpanProcessor(_LambdaExportProcessor, SpanProcessor):
+    """Queue finished spans for the per-invocation Lambda flush. See `_LambdaExportProcessor`.
+
+    Shares the `ExportCircuitBreaker` and bounded flush worker with logs.
+    """
+
+    _result_type = SpanExportResult
+    _queue_size_env = OTEL_BSP_MAX_QUEUE_SIZE
+    _batch_size_env = OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+
+    def on_end(self, span: ReadableSpan) -> None:
+        if self._shutdown:
+            return
+        self._queue.appendleft(span)
+
+
 __all__ = [
     "DEFAULT_CIRCUIT_BREAKER_SECONDS",
     "DEFAULT_MAX_CONNECTION_AGE_SECONDS",
@@ -309,7 +355,9 @@ __all__ = [
     "ENV_MAX_CONNECTION_AGE_SECONDS",
     "ExportCircuitBreaker",
     "FailureReportingExporter",
+    "FailureReportingSpanExporter",
     "LambdaLogRecordProcessor",
+    "LambdaSpanProcessor",
     "close_exporter_transport",
     "resolve_circuit_breaker_seconds",
     "resolve_max_connection_age_seconds",

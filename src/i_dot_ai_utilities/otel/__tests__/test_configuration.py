@@ -15,6 +15,7 @@ from opentelemetry.sdk._logs.export import (
     InMemoryLogRecordExporter,
     SimpleLogRecordProcessor,
 )
+from opentelemetry.sdk.trace import TracerProvider
 
 import i_dot_ai_utilities.otel as public_otel
 from i_dot_ai_utilities.otel import _instrumentation
@@ -27,7 +28,7 @@ from i_dot_ai_utilities.otel._configuration import (
     configure_otel,
     detect_runtime,
 )
-from i_dot_ai_utilities.otel._environment import has_otlp_logs_endpoint
+from i_dot_ai_utilities.otel._environment import has_otlp_endpoint
 from i_dot_ai_utilities.otel._instrumentation import (
     disabled_instrumentations,
     instrument_installed_libraries,
@@ -296,10 +297,10 @@ class TestServiceNameResolution:
     ) -> None:
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
-        assert has_otlp_logs_endpoint() is False
+        assert has_otlp_endpoint() is False
 
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://127.0.0.1:4318/v1/logs")
-        assert has_otlp_logs_endpoint() is True
+        assert has_otlp_endpoint() is True
 
 
 class TestAwsTracingDefaults:
@@ -590,6 +591,22 @@ class TestSdkInternals:
         finally:
             provider.shutdown()
 
+    def test_tracer_provider_exposes_atexit_handler_for_replacement(self) -> None:
+        provider = TracerProvider()
+        try:
+            assert callable(provider._atexit_handler)
+        finally:
+            provider.shutdown()
+
+    def test_otlp_span_exporter_exposes_closeable_transport_for_recycling_and_fork_safety(self) -> None:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # noqa: PLC0415
+
+        exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4318/v1/traces")
+        try:
+            assert callable(exporter._client._transport.close)
+        finally:
+            exporter.shutdown()
+
     def test_otlp_log_exporter_exposes_closeable_transport_for_recycling_and_fork_safety(self) -> None:
         from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter  # noqa: PLC0415
 
@@ -637,6 +654,27 @@ class TestFailSoftConfigurationAndLimits:
         assert "http/protobuf is the only supported OTLP protocol" not in proc.stderr
         (stdout_line,) = proc.stdout.splitlines()
         assert json.loads(stdout_line)["message"] == "still-logging"
+
+    def test_fallback_stops_span_export_when_sdk_rejects_settings_after_registering_tracer_provider(self) -> None:
+        script = (
+            "from opentelemetry import trace\n"
+            "from i_dot_ai_utilities.otel import configure_otel\n"
+            "configure_otel(service_name='svc')\n"
+            "with trace.get_tracer('app').start_as_current_span('span'):\n"
+            "    pass\n"
+            "trace.get_tracer_provider().force_flush()\n"
+        )
+        with OtlpCaptureServer() as server:
+            proc = _run_python(
+                script,
+                env_overrides={
+                    "OTEL_EXPORTER_OTLP_ENDPOINT": server.base_url,
+                    "OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT": "not-an-int",
+                },
+            )
+            assert "rejected the exporter settings" in proc.stderr
+            assert server.requests_for_path("/v1/traces") == []
+            assert "Shutdown called" not in proc.stdout
 
     def test_defaults_logrecord_attribute_value_length_limit_to_16384_and_respects_overrides(self) -> None:
         script = (

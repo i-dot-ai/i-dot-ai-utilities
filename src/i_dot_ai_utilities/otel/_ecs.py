@@ -18,10 +18,12 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Final
 
+from opentelemetry import trace
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_TIMEOUT,
+    OTEL_EXPORTER_OTLP_TRACES_TIMEOUT,
 )
 from opentelemetry.sdk.extension.aws.resource import AwsEcsResourceDetector
 
@@ -30,6 +32,7 @@ from i_dot_ai_utilities.otel._emf import RateLimitedFailureSignal
 from i_dot_ai_utilities.otel._environment import env_number, is_container_runtime
 from i_dot_ai_utilities.otel._export import (
     FailureReportingExporter,
+    FailureReportingSpanExporter,
     resolve_max_connection_age_seconds,
 )
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
@@ -40,6 +43,8 @@ if TYPE_CHECKING:
 
     from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
+    from opentelemetry.sdk.trace import SpanProcessor
+    from opentelemetry.sdk.trace.export import SpanExporter
     from opentelemetry.util.types import AttributeValue
 
 ENV_SHUTDOWN_TIMEOUT_MS: Final[str] = "I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS"
@@ -82,25 +87,41 @@ def _run_capped(target: Callable[[], object], timeout_seconds: float, *, name: s
     return not worker.is_alive()
 
 
-def register_capped_shutdown(provider: LoggerProvider, timeout_seconds: float) -> None:
+def register_capped_shutdown(
+    provider: LoggerProvider,
+    timeout_seconds: float,
+    *,
+    tracer_provider: object | None = None,
+) -> None:
     """Replace the SDK's `atexit` hook with a daemon-thread shutdown capped at `timeout_seconds`.
 
-    The SDK's default `atexit` hook waits up to 30 seconds, which consumes or
-    exceeds the default ECS `stopTimeout` and leaves no time for application
-    cleanup. When `timeout_seconds` expires on a hung gateway, the interpreter
-    exits and drops any remaining queued OTLP logs while stdout retains its
-    copy.
+    The SDK's default `atexit` hook waits up to 30 seconds per provider, which
+    consumes or exceeds the default ECS `stopTimeout` and leaves no time for
+    application cleanup. When `timeout_seconds` expires on a hung gateway, the
+    interpreter exits and drops any remaining queued telemetry while stdout
+    retains its log copy.
     """
     unregister_sdk_atexit(provider)
-    atexit.register(_run_capped, provider.shutdown, timeout_seconds, name="i-dot-ai-otel-shutdown")
+    providers: list[object] = [provider]
+    if tracer_provider is not None and callable(getattr(tracer_provider, "shutdown", None)):
+        unregister_sdk_atexit(tracer_provider)
+        providers.append(tracer_provider)
+
+    def _shutdown_all() -> None:
+        for item in providers:
+            shutdown = getattr(item, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
+
+    atexit.register(_run_capped, _shutdown_all, timeout_seconds, name="i-dot-ai-otel-shutdown")
 
 
 def flush_otel() -> bool:
-    """Flush queued OTLP logs now, capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`.
+    """Flush queued OTLP logs and traces now, capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`.
 
     Call this during server shutdown, such as after `yield` in a FastAPI
     lifespan, when the server exits without running `atexit` hooks. `uvicorn`
-    before 0.47 and `uvicorn --workers` both skip `atexit`, so queued logs
+    before 0.47 and `uvicorn --workers` both skip `atexit`, so queued telemetry
     would otherwise miss the gateway on task stop.
 
     The flush runs on a daemon thread capped at `I_DOT_AI_OTEL_SHUTDOWN_TIMEOUT_MS`,
@@ -112,11 +133,18 @@ def flush_otel() -> bool:
         `True` if the flush finished within the timeout, or `False` if it timed
         out or `configure_otel` has not configured a `LoggerProvider`.
     """
-    force_flush = getattr(get_logger_provider(), "force_flush", None)
-    if force_flush is None:
+    log_flush = getattr(get_logger_provider(), "force_flush", None)
+    if log_flush is None:
         return False
+    trace_flush = getattr(trace.get_tracer_provider(), "force_flush", None)
     timeout_ms = env_number(ENV_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS)
-    return _run_capped(lambda: force_flush(int(timeout_ms)), timeout_ms / 1000, name="i-dot-ai-otel-flush")
+
+    def _flush_all() -> None:
+        log_flush(int(timeout_ms))
+        if callable(trace_flush):
+            trace_flush(int(timeout_ms))
+
+    return _run_capped(_flush_all, timeout_ms / 1000, name="i-dot-ai-otel-flush")
 
 
 def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
@@ -172,10 +200,11 @@ class EcsRuntime(Runtime):
     def apply_env_defaults(self, *, can_export: bool) -> None:
         super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
-        # Leave OTEL_EXPORTER_OTLP_LOGS_TIMEOUT unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
-        # because the signal-specific variable would otherwise shadow the caller's general timeout.
+        # Leave signal-specific timeouts unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
+        # because the signal-specific variables would otherwise shadow the caller's general timeout.
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS)
+            os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_TIMEOUT, DEFAULT_CONTAINER_LOGS_TIMEOUT_SECONDS)
 
     def resource_attributes(self) -> dict[str, AttributeValue]:
         attributes = dict(AwsEcsResourceDetector().detect().attributes)
@@ -191,9 +220,22 @@ class EcsRuntime(Runtime):
             )
         )
 
+    def span_processor(self, exporter: SpanExporter) -> SpanProcessor:
+        return super().span_processor(
+            FailureReportingSpanExporter(
+                exporter,
+                self.failure_signal,
+                max_connection_age_seconds=resolve_max_connection_age_seconds(),
+            )
+        )
+
     def post_configure(self, provider: LoggerProvider) -> None:
         timeout_ms = env_number(ENV_SHUTDOWN_TIMEOUT_MS, DEFAULT_SHUTDOWN_TIMEOUT_MS)
-        register_capped_shutdown(provider, timeout_ms / 1000)
+        register_capped_shutdown(
+            provider,
+            timeout_ms / 1000,
+            tracer_provider=trace.get_tracer_provider(),
+        )
         install_sigterm_handler()
         super().post_configure(provider)
 
