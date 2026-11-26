@@ -1,140 +1,159 @@
-# Structured logging
-
-> **Migration notice:** For new services on ECS, Lambda, AWS Batch, and FastAPI, use `i_dot_ai_utilities.otel` instead (see the [OpenTelemetry guide](../otel/README.md)). `StructuredLogger` writes to stdout only and does not export to `otel-gateway`. The legacy `i_dot_ai_utilities.logging.otel` bridge and the Django middleware documented below will be removed.
+# Structured Logging
 
 ## Usage
 
-### Create a logger
+### Create a Logger
 
-Instantiate `StructuredLogger` to format logs for downstream consumers:
-
+You can create the most basic version of the logger by simply instantiating a new object of the logger class.
 ```python
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-
 logger = StructuredLogger()
 
-logger.info("Service started")
+...
+logger.info(...)
 ```
+This is enough to format your logs for consumption by downstream log subscribers.
 
-For production services, configure console text output locally and enriched JSON output on ECS (Fargate):
+<br>
 
+***
+
+<br>
+
+A more productionised version might look something like this - this uses console-based logging when running locally, and structures logging into JSON/enriches context when running in ECS (Fargate).
 ```python
-import os
-
-from i_dot_ai_utilities.logging.structured_logger import StructuredLogger
-from i_dot_ai_utilities.logging.types.enrichment_types import ExecutionEnvironmentType
-from i_dot_ai_utilities.logging.types.log_output_format import LogOutputFormat
-
-environment = os.environ.get("ENVIRONMENT")
+environment = os.environ.get('ENVIRONMENT')
 logger_environment = ExecutionEnvironmentType.LOCAL if environment == "LOCAL" else ExecutionEnvironmentType.FARGATE
 logger_format = LogOutputFormat.TEXT if environment == "LOCAL" else LogOutputFormat.JSON
 
-logger = StructuredLogger(
-    level="info",
-    options={
-        "execution_environment": logger_environment,
-        "log_format": logger_format,
-    },
-)
+logger = StructuredLogger(level='info', options={
+    "execution_environment": logger_environment,
+    "log_format": logger_format,
+})
 ```
 
-### Create log messages
+<br>
 
-Once you initialise the logger, emit log messages in three ways depending on the fields you need.
+***
 
-Log a plain string literal:
+<br>
+
+### Creating Log Messages
+Once the logger is initialised, you can create log messages in different ways depending on your requirement.
+For example, you can create simple messages with string-literals:
 
 ```python
 logger.info("A thing happened")
 ```
 
-Attach structured context fields to the log record:
-
+Or you might add some context fields to the log message so they become available in the downstream logging stack:
 ```python
-logger.info("Another thing happened", thing_id=12345, user_logged_in=True)
+logger.info("Anothing thing happened", thing_id=12345, user_logged_in=True)
 ```
 
-Interpolate values into the message while also capturing them as separate structured fields:
-
+You can also format strings so the message field itself contains useful data, whilst also capturing that useful data as separate fields:
 ```python
-logger.info("Yet another thing occurred for user {email} with id {id}", email=user_email, id=user_id)
+logger.info("Yet another thing occurred for user {email} with id {id}", email=user_email, id=id)
 ```
 
-Do not use f-strings in log messages. Passing keyword arguments lets `StructuredLogger` interpolate the message and preserve each field for downstream indexing.
+It is best practice to NOT to use f-strings in log message creation. Variable interpolation happens within the function itself and allows the library to extract message content correctly so it can be indexed downstream.
 
-When called inside an `except` block, `logger.exception()` logs the message and attaches the exception traceback automatically:
+<br>
 
+***
+
+<br>
+
+Exceptions are added to the message output automatically when called inside of an `except` block:
 ```python
-logger.exception("Something went wrong when user {email} logged in", email=email)
+logger.exception("Something went wrong when user {email} logging in", email=email)
 ```
 
-### Refresh the logger
+This will log the message, and inject the exception into the log context automatically.
 
-Call `refresh_context()` at the entry point of each API request or invocation. This call generates a new context ID and clears custom fields added earlier by enrichers or `set_context_field()`:
+<br>
 
+***
+
+<br>
+
+### Refreshing the Logger
+
+You should always refresh the logger context at the entrypoints of your API/application. This generates a new context ID and resets the logger for that invocation by removing any custom fields that were previously added by enrichers (see examples below) or through `set_context_field()`.
 ```python
 @app.post("/do/the/thing")
 async def do_the_thing(request: Request):
+
     logger.refresh_context()
 
     do_stuff()
+    ...
 ```
 
-Django services using `StructuredLoggingMiddlewareOTel` do not need to call `refresh_context()` manually because the middleware refreshes context per request.
+Django consumers should not need to call `refresh_context()` manually, since the `StructuredLoggingMiddlewareOTel` handles it per request (see below).
 
-### Set execution environment type and log format
+<br>
 
-#### Environment type
+***
 
-Configure the execution environment with the `execution_environment` option when instantiating `StructuredLogger`. Accepted values are defined in the `ExecutionEnvironmentType` enum in [enrichment_types.py](./types/enrichment_types.py). The logger extracts metadata from the configured execution environment and adds it to each log record.
+<br>
 
-#### Log format
+### Setting Execution Environment Type and Log Format
 
-Configure the output format with the `log_format` option when instantiating `StructuredLogger`. Accepted values are defined in the `LogOutputFormat` enum in [log_output_format.py](./types/log_output_format.py).
+#### Environment Type
 
-Use `LogOutputFormat.TEXT` for readable console output during local development. Use `LogOutputFormat.JSON` on deployed environments so downstream log pipelines can parse structured records.
+Environment Type is configurable using the `execution_environment` option setting when instantiating the logger. Accepted values are defined in the `ExecutionEnvironmentType` enum (see [here](./types/enrichment_types.py)).
 
-### Implement persistent context
+The logger will automatically extract important information from the execution environment and enrich log messages using it. 
 
-Use context enrichers to extract request or runtime metadata and attach it to subsequent log messages:
+#### Log Format
 
+Log format is configurable using the `log_format` option setting when instantiating the logger. Accepted values are defined in the `LogOutputFormat` enum (see [here](./types/log_output_format.py)).
+
+The ability to change log formats exists to give developers a friendlier log output when developing locally. They should be set to JSON format when running on the platform so structured logs can be read and processed in our logging stack downstream.
+
+<br>
+
+***
+
+<br>
+
+### Implementing Persistent Context
+Context can be automatically be added to log messages by using enrichers. Enrichers are helpers provided to you to automatically extract context related to a given execution:
 ```python
-from fastapi import FastAPI, Request
-
-from i_dot_ai_utilities.logging.types.enrichment_types import ContextEnrichmentType
-
-app = FastAPI()
-
-
 @app.get("/")
 async def root(request: Request):
-    logger.refresh_context(
-        context_enrichers=[
-            {
-                "type": ContextEnrichmentType.FASTAPI,
-                "object": request,
-            }
-        ]
-    )
+
+    logger.refresh_context(context_enrichers=[
+        {
+            "type": ContextEnrichmentType.FASTAPI,
+            "object": request,
+        }
+    ])
 
     do_stuff()
 ```
+The above example would extract information from the FastAPI request object (query string, path, user agent, etc) and inject it into all subsequent log messages until `refresh_context()` is called again.
 
-This example extracts fields from the FastAPI request object (such as query string, path, and user agent) and attaches them to every subsequent log message until the next `refresh_context()` call.
+Each Context Enricher object accepts a `type` and `object`. `type` is a `ContextEnrichmentType` enum ([see here](./types/enrichment_types.py) for accepted values). `object` is the Input Object to pass into the logger for context extraction - see the table below for further details.
 
-Each enricher entry accepts `type` and `object`. `type` is a `ContextEnrichmentType` enum member (see [enrichment_types.py](./types/enrichment_types.py)). `object` is the runtime object passed to the enricher:
+The following context enrichers are available for use:
 
-| Name | Input object | Extracted fields |
-|---|---|---|
-| FastAPI and Starlette | [Request object](https://fastapi.tiangolo.com/advanced/using-request-directly/#details-about-the-request-object) | [FastApiRequestMetadata](./types/fastapi_enrichment_schema.py#L31) |
-| Lambda | [Lambda context object](https://docs.aws.amazon.com/lambda/latest/dg/python-context.html) | [LambdaContextMetadata](./types/lambda_enrichment_schema.py) |
+| Name | Input Object | Extracted Fields |
+|---------|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| FastAPI / Starlette | [Request Object](https://fastapi.tiangolo.com/advanced/using-request-directly/#details-about-the-request-object) | See [FastApiRequestMetadata](./types/fastapi_enrichment_schema.py#31) |
+| Lambda  | [Lambda Context Object](https://docs.aws.amazon.com/lambda/latest/dg/python-context.html) | See [LambdaContextMetadata](./types/lambda_enrichment_schema.py) |
 
-Django services do not use a `ContextEnrichmentType`. When using the legacy Django middleware below, HTTP request attributes live on OpenTelemetry spans instead.
+Django consumers do **not** use a `ContextEnrichmentType`; HTTP request attributes live on OpenTelemetry spans via the Django middleware described in the next section.
 
-### Add custom context fields
+<br>
 
-Call `set_context_field()` to attach custom fields to every subsequent log message until the next `refresh_context()` call:
+***
 
+<br>
+
+### Adding your own context fields
+
+You can add custom fields to your logger, which will appear on each log message going forward until `refresh_context()` is called again. This is useful for enriching your own context onto log messages once important information has been discovered during execution.
 ```python
 @app.post("/login")
 async def login(request: Request):
@@ -144,42 +163,45 @@ async def login(request: Request):
 
     logger.info("User {email} started login process", email=user_email)
     logger.set_context_field("email", user_email)
+
+    ...
 ```
+Fields added in this manner will be indexed and searchable in the downstream logging stack.
 
-Downstream logging systems index fields added with `set_context_field()` so you can search on them.
+<br>
 
-## Django structured logging middleware
+***
 
-> **Deprecation notice:** `i_dot_ai_utilities.logging.otel`, `StructuredLoggingMiddlewareOTel`, and `DjangoUserIdMiddleware` belong to the legacy structlog OpenTelemetry bridge and will be removed. Do not adopt them for new services.
+<br>
 
-`StructuredLoggingMiddlewareOTel` is an OpenTelemetry-backed Django middleware that refreshes per-request context and logs request and response lifecycle events, removing the need for manual `refresh_context()` calls in views.
+## Django Structured Logging Middleware
 
-HTTP request attribute extraction (method, path, route, status code, user agent, and client address) runs in `opentelemetry-instrumentation-django`, which creates a server span per request carrying those attributes. The middleware handles only log-lifecycle concerns that cannot live on a span: `request_started`, `request_completed`, and `request_failed` events, `duration_ms`, status-driven log levels, per-hop `request_id`, path exclusions, header allowlisting, and request scope ownership.
+An OpenTelemetry-backed Django middleware that automates per-request context refresh and request/response lifecycle logging. Eliminates the need for manual `refresh_context()` calls in every view.
 
-Trace correlation on log records comes from a structlog processor reading the active span on every event, so any `logger.info(...)` call inside a view receives `trace_id`, `span_id`, and `trace_flags`.
+HTTP-request attribute extraction (method / path / route / status code / user agent / client address) is delegated to `opentelemetry-instrumentation-django`, which creates a server span per request whose attributes carry those values. The middleware itself keeps only the log-lifecycle concerns that cannot live on a span: `request_started` / `request_completed` / `request_failed` events, `duration_ms`, status-driven log level, per-hop `request_id`, exclusions, header allowlist, and scope ownership.
 
-Install `django` (Django and the middleware) and `otel_django` (the OpenTelemetry bootstrap and Django auto-instrumentation). Because these extras ship as pre-releases, pass `--pre` or pin the exact pre-release version:
+Trace correlation on log records comes from a structlog processor reading the active span on **every** event (not just the three lifecycle events), so any `logger.info(...)` inside a view automatically gets `trace_id` / `span_id` / `trace_flags`.
 
-```bash
+**Install** (`otel_django` brings the OTel bootstrap and Django auto-instrumentation; `django` brings Django itself and the middleware). This ships as a pre-release, so pass `--pre` or pin the pre-release version; a plain `pip install` skips pre-releases:
+
+```
 pip install --pre "i-dot-ai-utilities[django,otel_django]"
 ```
 
-> **Pre-release channels:** The command above installs from production PyPI. If a pre-release was published to Test PyPI instead, point your installer at Test PyPI with production PyPI as a fallback index and pin the exact timestamped version. See [CI and releases](../../../README.md#ci-and-releases) in the root README for the full per-channel install commands.
+> **Pre-release channels:** this OTel/Django functionality is opt-in and only compatible with our new observability stack — not the existing one. The command above works when the pre-release was published to **production PyPI**. If it was published to **Test PyPI** instead, `--pre` alone is not enough: you must also point the installer at Test PyPI (with a production fallback index for dependencies) and pin the exact timestamped version. See [CI/CD & Releases](../../../README.md#cicd--releases) in the root README for the full per-channel install commands.
 
-Configure OpenTelemetry once at startup in `wsgi.py`, `asgi.py`, or `AppConfig.ready()`:
+**Configure OTel once at startup** (`wsgi.py`, `asgi.py`, or an `AppConfig.ready()`):
 
 ```python
-from i_dot_ai_utilities.logging.otel import configure_otel_for_django
+from i_dot_ai_utilities.logging._otel import configure_otel_for_django
 
 configure_otel_for_django(service_name="my-service")
 ```
 
-When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `configure_otel_for_django()` automatically creates an `OTLPSpanExporter` targeting `<endpoint>/v1/traces` (using `OTEL_EXPORTER_OTLP_HEADERS` when set). When both `span_exporter` and `OTEL_EXPORTER_OTLP_ENDPOINT` are unset, it falls back to `ConsoleSpanExporter` for local development (unless `OTEL_REQUIRE_ENDPOINT` is enabled, in which case it raises `RuntimeError`). Pass `span_exporter` explicitly to override the default exporter:
+By default spans are exported to stdout via `ConsoleSpanExporter` - useful during local development. Pass a real exporter for production:
 
 ```python
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-from i_dot_ai_utilities.logging.otel import configure_otel_for_django
 
 configure_otel_for_django(
     service_name="my-service",
@@ -187,19 +209,21 @@ configure_otel_for_django(
 )
 ```
 
-Environment variables supported by `i_dot_ai_utilities.logging.otel`:
+**AWS / Phase 2 environment variables**
 
 | Variable | Purpose |
-|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector HTTP base URL, such as `http://nlb:4318` |
-| `OTEL_REQUIRE_ENDPOINT` | Set to `1` so a missing endpoint raises `RuntimeError` instead of falling back to console export |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` headers (for example `Authorization=Bearer ...`), applied to the trace, metric, and log exporters |
+|:---|:---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector HTTP base (e.g. `http://nlb:4318`) |
+| `OTEL_REQUIRE_ENDPOINT` | Set `1` so missing endpoint raises (no silent console export) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` (bearer: `Authorization=Bearer …`). Applied to the trace, metric, and log exporters alike |
 
-After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` from `i_dot_ai_utilities.logging.otel` so the trace-context and OTLP log processors survive logger reconfiguration. Legacy callers on this bridge path can also call `configure_otel_for_lambda()` and `force_flush_otel()` before exit. For new Python Lambdas targeting `otel-gateway`, use `i_dot_ai_utilities.otel` instead (see [OpenTelemetry-native logging](#opentelemetry-native-logging-i_dot_ai_utilitiesotel)).
+Dev (OTel PoC) endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT=https://search-i-dot-ai-dev-otel-poc-ekysqcfxvnh6touzvaf4dqa7ju.eu-west-2.es.amazonaws.com`
 
-If you do not call `configure_otel_for_django()` at startup, `StructuredLoggingMiddlewareOTel` emits a one-shot `WARNING` at worker boot (`structured_logging_middleware_otel_tracer_provider_missing`) pointing to the fix so missing trace correlation is immediately visible.
+After constructing `StructuredLogger`, call `ensure_structlog_otel_processors()` so trace/OTLP log processors survive logger reconfiguration. Legacy callers on this bridge path can also call `configure_otel_for_lambda` and `force_flush_otel()` before exit; new Python Lambdas targeting `otel-gateway` should use the native `i_dot_ai_utilities.otel` section at the bottom of this guide instead.
 
-Add the middleware to `settings.MIDDLEWARE` after `SecurityMiddleware` and `AuthenticationMiddleware`, and before application-specific middleware so timing and logging wrap as much of the request lifecycle as possible:
+If you forget to call `configure_otel_for_django` at startup, `StructuredLoggingMiddlewareOTel` emits a loud one-shot WARNING at worker boot (`structured_logging_middleware_otel_tracer_provider_missing`) pointing straight at the fix, so the degraded "no trace ids on logs" state is visible immediately rather than showing up as silent absence.
+
+**Wire into `settings.MIDDLEWARE`**. Place it after `SecurityMiddleware` and `AuthenticationMiddleware`, but before application-specific middleware so timing and logging wrap as much of the request lifecycle as possible:
 
 ```python
 MIDDLEWARE = [
@@ -207,20 +231,19 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "i_dot_ai_utilities.logging.middleware.django_otel.StructuredLoggingMiddlewareOTel",
-    # Add your other middleware here.
+    # ... your other middleware
 ]
 ```
 
-`DjangoInstrumentor` inserts its own middleware at the front of the chain automatically. Do not add it manually.
+`DjangoInstrumentor` inserts its own middleware at the front of the chain automatically; do not add it manually.
 
-### Wire the structlog processors
+### Wiring the trace-context structlog processor
 
-`configure_otel_for_django()` can insert both `otel_trace_context_processor` and `otel_otlp_log_emitter_processor` into your structlog processor list before the renderer:
+`configure_otel_for_django` can insert the processor into your structlog chain for you:
 
 ```python
 import structlog
-
-from i_dot_ai_utilities.logging.otel import configure_otel_for_django
+from i_dot_ai_utilities.logging._otel import configure_otel_for_django
 
 processors = [
     structlog.contextvars.merge_contextvars,
@@ -234,34 +257,32 @@ configure_otel_for_django(
 structlog.configure(processors=processors)
 ```
 
-To wire trace context manually without `structlog_processors`, add `otel_trace_context_processor` before the renderer, or call `insert_trace_processor(processors)` from `i_dot_ai_utilities.logging.otel` to insert both processors before the renderer:
+Or wire it yourself using the standalone helper:
 
 ```python
-import structlog
-
-from i_dot_ai_utilities.logging.otel import otel_trace_context_processor
+from i_dot_ai_utilities.logging._otel import otel_trace_context_processor
 
 processors = [
     structlog.contextvars.merge_contextvars,
     structlog.processors.add_log_level,
-    otel_trace_context_processor,  # Place before the renderer.
+    otel_trace_context_processor,          # <- before the renderer
     structlog.processors.JSONRenderer(),
 ]
 ```
 
 ### Settings
 
-All settings are optional. The middleware reads settings with `getattr(settings, ...)` and uses defaults for any setting you omit.
+All settings are optional. The middleware ships with sensible defaults and uses `getattr(settings, ...)` with fallbacks, so you can add them only when you want to override behaviour.
 
 | Setting | Type | Default | Purpose |
 |---|---|---|---|
-| `I_DOT_AI_LOGGER` | Logger object or zero-argument callable | Bare `structlog.get_logger(__name__)` wrapped to satisfy the six-method contract (`info`, `warning`, `error`, `exception`, `refresh_context`, and `set_context_field`) | Logger used by the middleware. Dotted import strings are rejected to prevent arbitrary boot-time imports. Import your logger in `settings.py` and assign it directly, or pass a zero-argument factory |
-| `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` | `bool` | `True` | Set to `False` to disable the middleware. When disabled, it raises `MiddlewareNotUsed` at startup |
-| `I_DOT_AI_LOGGING_EXCLUDED_PREFIXES` | Iterable of `str` | Health-check prefixes listed below | Skips all log events for paths matching these prefixes |
-| `I_DOT_AI_LOGGING_EXCLUDED_REGEXES` | Iterable of `str` or `re.Pattern` | `()` | Additional regex path exclusions, compiled once at startup |
-| `I_DOT_AI_LOGGING_HEADER_ALLOWLIST` | Iterable of `str` | `()` | Header names to bind to log context (truncated to 512 characters). Explicit allowlist only, never a denylist. A built-in denylist (`Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `X-CSRFToken`, `X-CSRF-Token`, `WWW-Authenticate`, and `X-API-Key`) always applies on top. Denied headers are filtered out and logged as a startup warning |
+| `I_DOT_AI_LOGGER` | logger object \| zero-arg callable | Bare `structlog.get_logger(__name__)` wrapped for the five-method contract | The logger the middleware writes through. **Dotted import strings are NOT accepted** (closes a boot-time arbitrary-import attack surface). Import your logger in `settings.py` and assign it directly, or pass a zero-arg factory. |
+| `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` | `bool` | `True` | Set to `False` to disable. The middleware then raises `MiddlewareNotUsed` cleanly at startup. |
+| `I_DOT_AI_LOGGING_EXCLUDED_PREFIXES` | iterable of `str` | Health-check prefixes (see below) | Paths whose prefix matches are skipped entirely; no log events. |
+| `I_DOT_AI_LOGGING_EXCLUDED_REGEXES` | iterable of `str` \| `re.Pattern` | `()` | Additional regex-based exclusions, compiled once at startup. |
+| `I_DOT_AI_LOGGING_HEADER_ALLOWLIST` | iterable of `str` | `()` | Header names to bind to the log context (truncated to 512 chars). Explicit allowlist only, never a denylist. A hard-coded denylist (`Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `X-CSRFToken`, `WWW-Authenticate`, `X-API-Key`) is always applied on top; names on the denylist are silently filtered out of the allowlist and a warning is emitted at startup. |
 
-Default excluded prefixes skip high-volume health probes:
+**Default excluded prefixes** (skipping all high-volume health probes):
 
 - `/health/`
 - `/healthz`
@@ -273,9 +294,9 @@ Default excluded prefixes skip high-volume health probes:
 
 ```python
 # settings.py
-from myapp.logging import build_logger  # Import directly; do not use a dotted string.
+from myapp.logging import build_logger  # imported in your own code, no dotted string
 
-I_DOT_AI_LOGGER = build_logger()  # Or pass the zero-argument callable: build_logger
+I_DOT_AI_LOGGER = build_logger()  # or: = build_logger  (zero-arg callable)
 I_DOT_AI_LOGGING_EXCLUDED_PREFIXES = (
     "/healthz",
     "/api/internal/",
@@ -288,74 +309,80 @@ I_DOT_AI_LOGGING_HEADER_ALLOWLIST = ("X-Tenant-ID",)
 | Event | When | Level |
 |---|---|---|
 | `structured_logging_middleware_otel_active` | Once per worker process at startup | `info` |
-| `structured_logging_middleware_otel_forbidden_headers_rejected` | At startup only when `I_DOT_AI_LOGGING_HEADER_ALLOWLIST` contains forbidden headers that were removed | `warning` |
-| `structured_logging_middleware_otel_tracer_provider_missing` | At startup only when no SDK `TracerProvider` is installed (for example, when `configure_otel_for_django()` was not called) | `warning` |
-| `request_started` | Entering the view chain for non-excluded paths | `info` |
-| `request_completed` | View returned normally or raised `Http404` | `info` (2xx and 3xx), `warning` (4xx including `Http404`), `error` (5xx) |
+| `structured_logging_middleware_otel_forbidden_headers_rejected` | At startup iff `I_DOT_AI_LOGGING_HEADER_ALLOWLIST` contained forbidden names that were scrubbed | `warning` |
+| `structured_logging_middleware_otel_tracer_provider_missing` | At startup iff no SDK `TracerProvider` is installed (i.e. `configure_otel_for_django` was not called) | `warning` |
+| `request_started` | Entering the view chain (non-excluded paths) | `info` |
+| `request_completed` | View returned normally, OR raised `Http404` (404 is ordinary traffic, not a failure) | `info` (2xx/3xx), `warning` (4xx incl. `Http404`), `error` (5xx) |
 | `request_failed` | View raised any unhandled exception other than `Http404` | `error` |
 
-The middleware logs unhandled exceptions with full tracebacks via `logger.exception(...)` and re-raises them with a bare `raise`, preserving the original traceback for error trackers, Django REST framework, and the debug toolbar. `Http404` is treated as ordinary 4xx traffic: it logs at `warning` with status `404`, event name `request_completed`, and no traceback.
+Exceptions are logged with full traceback via `logger.exception(...)` then re-raised with a bare `raise`, preserving the original traceback for Sentry / DRF / the debug toolbar. `Http404` is carved out: WARNING, status 404, `request_completed` event name, no traceback (it's a control-flow signal, not a crash).
 
 ### Log record schema
 
-The log schema is intentionally narrow because HTTP request context lives on the OpenTelemetry span rather than the log line. Every event includes `logging_schema_version = "1.0"` so consumers can detect breaking schema changes.
+The schema is deliberately narrow. HTTP request context lives on the OTel span, not the log line. Every event also carries `logging_schema_version = "1.0"` so consumers can detect breaking changes.
 
 | Field | Source | Type | Notes |
 |---|---|---|---|
-| `logging_schema_version` | Middleware | `str` | Always `"1.0"` in this release |
-| `http.response.status_code` | Middleware | `int` | Captured after the view returns. Synthesised to `500` on an unhandled exception and `404` on `Http404` |
-| `error.type` | Middleware | `str`, optional | Status code string (such as `"404"` or `"500"`) on 4xx and 5xx responses and `Http404`. Fully qualified exception class name (such as `"builtins.RuntimeError"`) on unhandled exceptions. Absent on 2xx and 3xx responses, following OpenTelemetry HTTP semantic conventions |
-| `exception.type` | Middleware | `str`, optional | `type(exc).__name__` on `request_failed` and on `Http404` `request_completed` events |
-| `http.request.header.*` | Middleware | `str` | Emitted only for headers listed in `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`, lowercased with hyphens replaced by underscores and values capped at 512 characters |
-| `duration_ms` | Middleware | `int` | `time.monotonic()` delta, clamped to at least `0` |
-| `request_id` | Middleware | `str` | Always a fresh per-hop UUID4 hex string (32 characters), distinct from `trace_id` and from any inbound correlation ID |
-| `upstream_request_id` | Middleware | `str`, optional | Inbound `X-Request-ID` preserved verbatim when present and charset-valid (RFC 3986 unreserved characters plus common base64 characters), capped at 200 characters. Absent when missing or invalid to prevent log injection |
-| `trace_id` | Structlog processor | `str`, optional | 32-character hex active trace ID. Absent outside a span |
-| `span_id` | Structlog processor | `str`, optional | 16-character hex active span ID. Absent outside a span |
-| `trace_flags` | Structlog processor | `str`, optional | 2-character hex active trace flags. Absent outside a span |
+| `logging_schema_version` | middleware | `str` | Always `"1.0"` in this release |
+| `http.response.status_code` | middleware | `int` | Captured after the view returns. Synthesised to `500` on unhandled exception, `404` on `Http404` |
+| `error.type` | middleware | `str`, optional | Status code string (e.g. `"404"`, `"500"`) on 4xx/5xx responses and `Http404`. Fully-qualified exception class name (e.g. `"builtins.RuntimeError"`) on the unhandled-exception path. Absent on 2xx/3xx. Per OTel HTTP semconv note 4 |
+| `exception.type` | middleware | `str`, optional | `type(exc).__name__` on `request_failed` and on the `Http404`-induced `request_completed` |
+| `http.request.header.*` | middleware | `str` | Only for headers explicitly in `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`; lowercased, hyphens to underscores. Length-capped at 512 chars |
+| `duration_ms` | middleware | `int` | `time.monotonic()` delta, clamped to >= 0 |
+| `request_id` | middleware | `str` | **Always** a fresh per-hop UUID4 hex (32 chars). Distinct from `trace_id` and from any inbound correlation id |
+| `upstream_request_id` | middleware | `str`, optional | Inbound `X-Request-ID` preserved verbatim when present and charset-valid (RFC 3986 unreserved + common base64 chars). Length-capped at 200 chars. Absent when no inbound header or when the inbound value fails charset validation (blocks log-injection via attacker-chosen identifiers) |
+| `trace_id` | structlog processor | `str`, optional | 32-hex active trace id; absent outside a span |
+| `span_id` | structlog processor | `str`, optional | 16-hex active span id; absent outside a span |
+| `trace_flags` | structlog processor | `str`, optional | 2-hex active trace flags; absent outside a span |
 
-### Attributes on the span instead of the log record
+### What's on the span, not the log record
 
-These attributes live on the OpenTelemetry server span in your trace backend, not on log lines:
+The following attributes live on the OTel server span and are queryable via your trace backend, NOT on the log line:
 
-- `http.request.method`, `url.scheme`, `url.path`, `url.query`, and `server.address`
-- `user_agent.original`, `client.address`, and `http.request.header.x_forwarded_for`
-- `http.route` and `django.url_name`
+- `http.request.method`, `url.scheme`, `url.path`, `url.query`, `server.address`
+- `user_agent.original`, `client.address`, `http.request.header.x_forwarded_for`
+- `http.route`, `django.url_name`
 
-If your Loki dashboards need to filter on any of these attributes, query them in your trace backend and join log records on `trace_id`.
+If your OpenSearch / Loki dashboards need to filter on any of these, shift those queries to your trace backend and join log records on `trace_id`.
 
 ### Request-ID semantics
 
-The middleware generates a fresh per-hop `request_id` UUID4, distinct from any inbound correlation header:
+The middleware mints a fresh per-hop `request_id` UUID4, distinct from any inbound correlation value:
 
-- `request_id` is always a newly generated 32-character UUID4 hex string created at request entry.
-- When an inbound `X-Request-ID` header is present and passes charset validation, the middleware preserves it verbatim in `upstream_request_id` (capped at 200 characters). The two fields never collide.
-- Inbound values containing whitespace, control characters, or quoting characters are rejected silently, and `upstream_request_id` is omitted. Rejecting unsafe values blocks log injection and log-search hijacking.
-- `X-Request-ID` is never used as `trace_id` and is never passed to the OpenTelemetry propagator. Trace context comes from `traceparent` and `X-Amzn-Trace-Id` via the composite propagator.
+- `request_id` is **always** a freshly generated UUID4 hex, minted at request entry.
+- An inbound `X-Request-ID` header, when present and charset-valid, is preserved verbatim in a separate `upstream_request_id` field (length-capped at 200 chars). The two fields never collide.
+- Charset-invalid inbound values (whitespace, control characters, quoting characters) are rejected silently; the `upstream_request_id` field is simply omitted. Accepting an attacker-chosen `X-Request-ID` verbatim into log context enables log-injection and log-search hijack.
+- `X-Request-ID` is NEVER used as the trace id or fed to the OTel propagator. Trace context comes from `traceparent` / `X-Amzn-Trace-Id` via the composite propagator.
 
 ### Trace-header handling
 
-The OpenTelemetry composite propagator (W3C Trace Context and AWS X-Ray, installed by `configure_otel_for_django()`) extracts inbound trace headers. **W3C `traceparent` takes precedence when both `traceparent` and `X-Amzn-Trace-Id` are present.** `X-Request-ID` is not trace context and is never fed to the propagator.
+OTel's composite propagator (W3C Trace Context + AWS X-Ray, installed by `configure_otel_for_django`) handles inbound headers. **W3C `traceparent` wins when both `traceparent` and `X-Amzn-Trace-Id` are present.** `X-Request-ID` is not a trace context and is never fed to the propagator - it is bound to the `upstream_request_id` log field when charset-valid.
 
 ### Security
 
-- The middleware rejects `FORBIDDEN_HEADER_NAMES` (`Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `X-CSRFToken`, `X-CSRF-Token`, `WWW-Authenticate`, and `X-API-Key`) even when listed in `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`. It emits a `structured_logging_middleware_otel_forbidden_headers_rejected` warning at startup so misconfiguration is visible.
-- `I_DOT_AI_LOGGER` accepts only logger objects and zero-argument callables. It rejects dotted-import strings to prevent arbitrary boot-time code imports.
-- Inbound `X-Request-ID` values undergo strict charset validation (RFC 3986 unreserved characters plus common base64 characters) before binding to `upstream_request_id`. Values with whitespace, control bytes, or quoting characters are dropped silently to block log injection and log-search hijacking.
-- Request scope ownership (`REQUEST_SCOPE_OWNER_MIDDLEWARE`) prevents mid-request `refresh_context()` calls in views or helpers from clearing the request audit trail.
-- Malformed settings (non-iterable `I_DOT_AI_LOGGING_EXCLUDED_PREFIXES`, invalid patterns in `I_DOT_AI_LOGGING_EXCLUDED_REGEXES`, or non-iterable `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`) raise `django.core.exceptions.ImproperlyConfigured` at startup with a clear message instead of failing on the first request. Non-string items inside an otherwise valid allowlist are skipped silently.
+- `FORBIDDEN_HEADER_NAMES` (Authorization, Cookie, Set-Cookie, Proxy-Authorization, X-CSRFToken, X-CSRF-Token, WWW-Authenticate, X-API-Key) are refused even when listed in `I_DOT_AI_LOGGING_HEADER_ALLOWLIST`. A `structured_logging_middleware_otel_forbidden_headers_rejected` WARNING is emitted at startup when this happens so mis-configuration is visible.
+- `I_DOT_AI_LOGGER` accepts logger objects and zero-arg callables - never dotted-import strings (finding A4).
+- Inbound `X-Request-ID` is charset-validated (RFC 3986 unreserved + common base64 chars) before being bound as `upstream_request_id`. Attacker-controlled values containing whitespace, control bytes, or quoting characters are dropped silently (finding A3: blocks log-injection / log-search hijack).
+- Scope ownership (`REQUEST_SCOPE_OWNER_MIDDLEWARE`) guards against mid-request `refresh_context()` calls from views or helpers silently de-correlating the audit trail.
+- Malformed settings (`I_DOT_AI_LOGGING_EXCLUDED_PREFIXES` non-iterable, `I_DOT_AI_LOGGING_EXCLUDED_REGEXES` with invalid patterns, `I_DOT_AI_LOGGING_HEADER_ALLOWLIST` non-iterable) raise `django.core.exceptions.ImproperlyConfigured` at boot with a specific message; no bare `TypeError` / `re.error` / `AttributeError` crashes on the first request. Non-string entries inside an otherwise valid allowlist are dropped silently so copy-paste bugs don't brick startup.
 
 ### Notes
 
-- The middleware is synchronous only (`sync_capable = True`, `async_capable = False`).
-- Context isolation is thread-safe under Gunicorn sync and gthread workers via `structlog.contextvars`.
-- `configure_otel_for_django()` is idempotent and safe to call during both `wsgi.py` and `asgi.py` initialisation.
+- Sync-only. `sync_capable = True`, `async_capable = False`.
+- Thread-safe under Gunicorn sync / gthread workers via `structlog.contextvars`.
+- `configure_otel_for_django` is idempotent - safe to call during both `wsgi.py` and `asgi.py` initialisation.
 
-## Bind `user.id` to log records
+<br>
 
-`StructuredLoggingMiddlewareOTel` does not extract the authenticated user because OpenTelemetry's Django instrumentation does not expose it as a span attribute and keeping user extraction separate avoids coupling the main middleware to Django's auth model.
+***
 
-Add the companion `DjangoUserIdMiddleware` when you need authenticated-user attribution on log records:
+<br>
+
+## Binding `user.id` to log records
+
+The Django middleware deliberately does **not** extract the authenticated user. OpenTelemetry's Django instrumentation does not expose it as a span attribute, and baking the extraction into the main middleware would re-entangle this library with Django's auth model.
+
+A thin companion middleware, `DjangoUserIdMiddleware`, does this one job safely:
 
 ```python
 MIDDLEWARE = [
@@ -364,28 +391,34 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "i_dot_ai_utilities.logging.middleware.django_otel.StructuredLoggingMiddlewareOTel",
     "i_dot_ai_utilities.logging.middleware.django_user_id.DjangoUserIdMiddleware",
-    # Add your other middleware here.
+    # ... your other middleware
 ]
 ```
 
-Place `DjangoUserIdMiddleware` in this order:
+Ordering matters:
 
-1. **After `AuthenticationMiddleware`** so `request.user` exists.
-2. **After `StructuredLoggingMiddlewareOTel`** so the request scope is active and `set_context_field("user.id", ...)` binds to the current request context.
+1. **After `AuthenticationMiddleware`**, so `request.user` exists.
+2. **After `StructuredLoggingMiddlewareOTel`**, so the request scope is already active and `set_context_field("user.id", ...)` lands on the correct per-request context.
 
 ### Safety guarantees
 
-`DjangoUserIdMiddleware` preserves these safeguards:
+The middleware lifts the hardening that used to live inside the deleted `DjangoEnricher`:
 
-- **No database query on an unhydrated `SimpleLazyObject`.** Django's auth middleware assigns a `SimpleLazyObject` to `request.user`, and reading `.pk` before hydration triggers a `User.objects.get(...)` query. Observability code must not issue database queries because doing so can mask database outages in the logs needed to diagnose them. The middleware checks the `_wrapped` sentinel structurally without forcing evaluation.
-- **Database errors surface as warnings.** If reading `request.user.is_authenticated` or `request.user.pk` raises a Django database error (`DatabaseError`, `OperationalError`, `InterfaceError`, `ProgrammingError`, or `IntegrityError`), the middleware logs a warning naming the failing access and allows the request to continue.
-- **Anonymous users omit `user.id`.** No falsy placeholder is emitted, so presence checks such as `has(user.id)` work cleanly.
-- **No PII fields.** Only the opaque primary key is emitted, never email addresses, usernames, or other PII. The OpenTelemetry `enduser.*` namespace was deprecated in v1.24.
+- **No database query from an unhydrated `SimpleLazyObject`**. Django's auth middleware assigns a `SimpleLazyObject` to `request.user`; touching `.pk` before it hydrates triggers a `User.objects.get(...)` query. Observability code must never issue such a query, since it masks database outages from the very logs that would diagnose them. The middleware detects the unhydrated state structurally (`_wrapped` sentinel) without forcing evaluation.
+- **Database errors surface as WARNINGs**, not silent drops. If reading `request.user.is_authenticated` or `request.user.pk` raises a Django `DatabaseError` / `OperationalError` / `InterfaceError` / `ProgrammingError` / `IntegrityError`, the middleware emits a WARNING naming the failing access and continues; the request is unaffected but operators see the outage.
+- Anonymous users produce no `user.id` field at all (not a falsy value), so `has(user.id)` queries discriminate cleanly.
+- The OTel `enduser.*` namespace was deprecated in v1.24; only the opaque primary key is emitted, never email / username / other PII.
 
-### User-ID middleware settings
+### Settings
 
-`DjangoUserIdMiddleware` uses the same `I_DOT_AI_LOGGER` and `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` settings as `StructuredLoggingMiddlewareOTel` and requires no additional configuration.
+`DjangoUserIdMiddleware` honours the same `I_DOT_AI_LOGGER` and `I_DOT_AI_LOGGING_MIDDLEWARE_ENABLED` settings as `StructuredLoggingMiddlewareOTel`; no additional configuration is required.
+
+<br>
+
+***
+
+<br>
 
 ## OpenTelemetry-native logging (`i_dot_ai_utilities.otel`)
 
-The OpenTelemetry-native path for Lambda, ECS, AWS Batch, and FastAPI, including the `i_ai` attribute naming rules, is documented in the [OpenTelemetry guide](../otel/README.md). It is separate from `StructuredLogger` and the legacy middleware above.
+The OpenTelemetry-native path for Lambda, ECS, AWS Batch and FastAPI, including the `i_ai` attribute naming rules, is documented in the [otel readme](../otel/README.md). It is separate from `StructuredLogger` and the middleware above.
