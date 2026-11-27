@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk.trace import TracerProvider
 
 from i_dot_ai_utilities.otel import _ecs, flush_otel
 from i_dot_ai_utilities.otel.__tests__.fixtures.ecs_metadata_server import (
@@ -129,9 +130,14 @@ class TestEcsAndBatchHelpers:
         provider = LoggerProvider()
         assert provider._at_exit_handler is not None
 
-        register_capped_shutdown(provider, 0.1)
+        tracer_provider = TracerProvider()
+        assert tracer_provider._atexit_handler is not None
+
+        register_capped_shutdown(provider, 0.1, tracer_provider=tracer_provider)
         assert provider._at_exit_handler is None
+        assert tracer_provider._atexit_handler is None
         provider.shutdown()
+        tracer_provider.shutdown()
 
     def test_flush_otel_caps_wait_at_shutdown_timeout_and_returns_false_before_configure(
         self,
@@ -193,7 +199,9 @@ class TestEcsFastApiEndToEnd:
             assert resource["aws.ecs.container.arn"] == CONTAINER_ARN
             assert resource["aws.ecs.launchtype"] == "fargate"
             assert resource["aws.ecs.task.family"] == "test-service"
-            assert server.requests_for_path("/v1/traces") == []
+            assert len(server.requests_for_path("/v1/traces")) >= 1
+            assert {span.trace_id for span in server.spans} >= {rec.trace_id for rec in records}
+            assert server.spans[0].resource_attributes["service.name"] == "sample-api"
 
             stdout_records = [rec for rec in _stdout_json(proc) if rec.get("message") == "Item requested"]
             assert len(stdout_records) == 3

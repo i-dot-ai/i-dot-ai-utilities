@@ -17,12 +17,14 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Any, Final
 
+from opentelemetry import trace
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.sdk.environment_variables import (
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
     OTEL_BLRP_MAX_QUEUE_SIZE,
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_TIMEOUT,
+    OTEL_EXPORTER_OTLP_TRACES_TIMEOUT,
 )
 from opentelemetry.sdk.extension.aws.resource import AwsLambdaResourceDetector
 from wrapt import wrap_function_wrapper
@@ -32,6 +34,7 @@ from i_dot_ai_utilities.otel._environment import env_number, keep_stdout_logs, l
 from i_dot_ai_utilities.otel._export import (
     ExportCircuitBreaker,
     LambdaLogRecordProcessor,
+    LambdaSpanProcessor,
     resolve_circuit_breaker_seconds,
 )
 from i_dot_ai_utilities.otel._runtime import Runtime, apply_aws_trace_env_defaults, unregister_sdk_atexit
@@ -41,7 +44,11 @@ if TYPE_CHECKING:
 
     from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
+    from opentelemetry.sdk.trace import SpanProcessor
+    from opentelemetry.sdk.trace.export import SpanExporter
     from opentelemetry.util.types import AttributeValue
+
+LambdaTelemetryProcessor = LambdaLogRecordProcessor | LambdaSpanProcessor
 
 ENV_FLUSH_MARGIN_MS: Final[str] = "I_DOT_AI_OTEL_LAMBDA_FLUSH_MARGIN_MS"
 DEFAULT_FLUSH_MARGIN_MS: Final[int] = 250
@@ -52,7 +59,10 @@ FLUSH_JOIN_OVERHEAD_MS: Final[int] = 100
 DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS: Final[str] = "2"
 DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE: Final[str] = "512"
 DEFAULT_LAMBDA_MAX_QUEUE_SIZE: Final[str] = "2048"
-DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS: Final[str] = "2000"
+# AwsLambdaInstrumentor calls tracer_provider.force_flush(timeout) synchronously on
+# the handler thread. Setting 0 defers flushing to our bounded daemon worker so
+# slow DNS or gateway outages share the circuit breaker and flush budget.
+DEFAULT_LAMBDA_INSTRUMENTATION_FLUSH_TIMEOUT_MS: Final[str] = "0"
 OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT: Final[str] = "OTEL_INSTRUMENTATION_AWS_LAMBDA_FLUSH_TIMEOUT"
 
 _LAMBDA_HANDLER_MARKER: Final[str] = "_i_dot_ai_otel_lambda_wrapped"
@@ -150,15 +160,27 @@ def _remaining_time_millis(context: Any) -> int | None:
     return None
 
 
-def _run_flush(processors: Sequence[LambdaLogRecordProcessor], timeout_ms: int, outcome: dict[str, bool]) -> None:
-    """Flush logs into `outcome["flushed"]`, catching all errors so a worker failure never crashes the thread."""
+def _run_flush(processors: Sequence[LambdaTelemetryProcessor], timeout_ms: int, outcome: dict[str, bool]) -> None:
+    """Flush logs and spans into `outcome["flushed"]`, catching all errors so a worker failure never crashes."""
     try:
-        # Flush via provider.force_flush when available so every registered log processor flushes alongside processors.
-        provider = get_logger_provider()
-        if hasattr(provider, "force_flush"):
-            outcome["flushed"] = bool(provider.force_flush(timeout_ms))
-        else:
-            outcome["flushed"] = all(processor.force_flush(timeout_ms) for processor in processors)
+        # Flush via providers when available so every registered processor flushes alongside ours.
+        logs_ok = True
+        has_log_procs = any(isinstance(p, LambdaLogRecordProcessor) for p in processors)
+        has_span_procs = any(isinstance(p, LambdaSpanProcessor) for p in processors)
+        if has_log_procs:
+            log_provider = get_logger_provider()
+            if hasattr(log_provider, "force_flush"):
+                logs_ok = bool(log_provider.force_flush(timeout_ms))
+            else:
+                logs_ok = all(p.force_flush(timeout_ms) for p in processors if isinstance(p, LambdaLogRecordProcessor))
+        spans_ok = True
+        if has_span_procs:
+            tracer_provider = trace.get_tracer_provider()
+            if hasattr(tracer_provider, "force_flush"):
+                spans_ok = bool(tracer_provider.force_flush(timeout_ms))
+            else:
+                spans_ok = all(p.force_flush(timeout_ms) for p in processors if isinstance(p, LambdaSpanProcessor))
+        outcome["flushed"] = logs_ok and spans_ok
     except Exception:  # noqa: BLE001
         outcome["flushed"] = False
 
@@ -166,8 +188,8 @@ def _run_flush(processors: Sequence[LambdaLogRecordProcessor], timeout_ms: int, 
 def flush_lambda_logs(  # noqa: PLR0911
     context: Any,
     *,
-    processor: LambdaLogRecordProcessor | None = None,
-    processors: Sequence[LambdaLogRecordProcessor] = (),
+    processor: LambdaTelemetryProcessor | None = None,
+    processors: Sequence[LambdaTelemetryProcessor] = (),
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
@@ -269,8 +291,8 @@ def resolve_lambda_handler_target() -> tuple[str, str] | None:
 
 def instrument_lambda_handler(
     *,
-    processor: LambdaLogRecordProcessor | None = None,
-    processors: Sequence[LambdaLogRecordProcessor] = (),
+    processor: LambdaTelemetryProcessor | None = None,
+    processors: Sequence[LambdaTelemetryProcessor] = (),
     breaker: ExportCircuitBreaker,
     failure_emitter: Callable[[str], None] = emit_lambda_export_failure,
 ) -> bool:
@@ -371,15 +393,16 @@ class LambdaRuntime(Runtime):
     def __init__(self, *, service_name: str | None) -> None:
         super().__init__(service_name=service_name)
         self.breaker = ExportCircuitBreaker(open_seconds=resolve_circuit_breaker_seconds())
-        self.processors: list[LambdaLogRecordProcessor] = []
+        self.processors: list[LambdaTelemetryProcessor] = []
 
     def apply_env_defaults(self, *, can_export: bool) -> None:
         super().apply_env_defaults(can_export=can_export)
         apply_aws_trace_env_defaults()
-        # Leave OTEL_EXPORTER_OTLP_LOGS_TIMEOUT unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
-        # because the signal-specific variable would otherwise shadow the caller's general timeout.
+        # Leave signal-specific timeouts unset when OTEL_EXPORTER_OTLP_TIMEOUT is set,
+        # because the signal-specific variables would otherwise shadow the caller's general timeout.
         if not os.environ.get(OTEL_EXPORTER_OTLP_TIMEOUT, "").strip():
             os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
+            os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_TIMEOUT, DEFAULT_LAMBDA_LOGS_TIMEOUT_SECONDS)
         os.environ.setdefault(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE, DEFAULT_LAMBDA_MAX_EXPORT_BATCH_SIZE)
         os.environ.setdefault(OTEL_BLRP_MAX_QUEUE_SIZE, DEFAULT_LAMBDA_MAX_QUEUE_SIZE)
         os.environ.setdefault(
@@ -395,10 +418,16 @@ class LambdaRuntime(Runtime):
         self.processors.append(processor)
         return processor
 
+    def span_processor(self, exporter: SpanExporter) -> SpanProcessor:
+        processor = LambdaSpanProcessor(exporter, self.breaker)
+        self.processors.append(processor)
+        return processor
+
     def post_configure(self, provider: LoggerProvider) -> None:
         # Lambda freezes and terminates environments outside invocation boundaries. Remove the SDK
-        # atexit hook so process teardown cannot bypass the circuit breaker with a blocking flush.
+        # atexit hooks so process teardown cannot bypass the circuit breaker with a blocking flush.
         unregister_sdk_atexit(provider)
+        unregister_sdk_atexit(trace.get_tracer_provider())
         self.on_reconfigure()
 
     def on_reconfigure(self) -> None:

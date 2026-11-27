@@ -20,7 +20,7 @@ import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from opentelemetry import propagate
+from opentelemetry import propagate, trace
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.distro import OpenTelemetryConfigurator
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
@@ -41,7 +41,7 @@ from opentelemetry.sdk.environment_variables import (
 from opentelemetry.sdk.resources import OTELResourceDetector
 
 from i_dot_ai_utilities.otel._attributes import AttributeNamespaceProcessor, warm_semconv_registry
-from i_dot_ai_utilities.otel._environment import has_otlp_logs_endpoint, is_container_runtime
+from i_dot_ai_utilities.otel._environment import has_otlp_endpoint, is_container_runtime
 from i_dot_ai_utilities.otel._instrumentation import instrument_installed_libraries
 from i_dot_ai_utilities.otel._runtime import Runtime, RuntimeName
 
@@ -236,6 +236,7 @@ def _configure_sdk(runtime: Runtime) -> None:
             # Run AttributeNamespaceProcessor ahead of export processors, even when OTLP export is disabled.
             log_record_processors=[AttributeNamespaceProcessor()],
             export_log_record_processor=runtime.log_record_processor,
+            export_span_processor=runtime.span_processor,
         )
 
     try:
@@ -253,6 +254,13 @@ def _configure_sdk(runtime: Runtime) -> None:
         for name in (OTEL_LOGS_EXPORTER, OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER):
             os.environ[name] = "none"
         _clear_invalid_limit_env_vars()
+        # The retry cannot replace a tracer provider the failed attempt already registered, so shut
+        # down its OTLP span processor. Spans are still created, which keeps log trace correlation.
+        shutdown_tracing = getattr(trace.get_tracer_provider(), "shutdown", None)
+        if callable(shutdown_tracing):
+            shutdown_tracing()
+            # A shut-down BatchSpanProcessor logs "Shutdown called, ignoring Span." at INFO for every span.
+            logging.getLogger("opentelemetry.sdk._shared_internal").setLevel(logging.WARNING)
         _configure()
 
 
@@ -296,7 +304,7 @@ def configure_otel(
         return _state.logger_provider
 
     active = _load_runtime_class(resolved_runtime)(service_name=_resolve_service_name(service_name))
-    endpoint_configured = has_otlp_logs_endpoint()
+    endpoint_configured = has_otlp_endpoint()
     if not endpoint_configured:
         _warn_once("endpoint", active.missing_endpoint_message)
     elif active.service_name is None:

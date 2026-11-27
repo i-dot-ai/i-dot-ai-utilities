@@ -570,10 +570,10 @@ class TestLambdaFlushBudget:
 class TestLambdaEndToEnd:
     """Lambda freezes the process as soon as the handler returns, so logs flush synchronously per invocation."""
 
-    def test_exports_trace_correlated_logs_with_lambda_resource_and_headers_without_traces_or_metrics(
+    def test_exports_trace_correlated_logs_and_traces_with_lambda_resource_and_headers_without_metrics(
         self,
     ) -> None:
-        """``otel-gateway`` only runs a logs pipeline, so traces and metrics default to ``none``."""
+        """``otel-gateway`` runs logs and traces pipelines; metrics remain ``none``."""
         with OtlpCaptureServer() as server:
             proc, summary = _run_scenario(
                 [
@@ -598,7 +598,7 @@ class TestLambdaEndToEnd:
             )
 
             assert len(server.requests_for_path("/v1/logs")) == 1
-            assert server.requests_for_path("/v1/traces") == []
+            assert len(server.requests_for_path("/v1/traces")) == 1
             assert server.requests_for_path("/v1/metrics") == []
 
             req = server.requests_for_path("/v1/logs")[0]

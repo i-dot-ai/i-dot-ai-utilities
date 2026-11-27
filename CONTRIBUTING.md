@@ -39,3 +39,7 @@ uv run python scratch.py      # Running a local script
 uv run ruff format            # Running ruff format
 uv run ruff check --fix       # Running ruff check
 ```
+
+## Release a new version
+
+Read [`RELEASING.md`](./RELEASING.md) for step-by-step instructions on publishing pre-releases to production PyPI or Test PyPI and cutting stable releases from `main`.

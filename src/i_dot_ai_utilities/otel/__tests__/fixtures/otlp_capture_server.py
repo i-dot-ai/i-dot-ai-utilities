@@ -13,6 +13,10 @@ from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
     ExportLogsServiceRequest,
     ExportLogsServiceResponse,
 )
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest,
+    ExportTraceServiceResponse,
+)
 from typing_extensions import Self
 
 
@@ -49,11 +53,68 @@ class CapturedLogRecord:
 
 
 @dataclass
+class CapturedSpan:
+    name: str
+    trace_id: str
+    span_id: str
+    attributes: dict[str, Any]
+    resource_attributes: dict[str, Any]
+
+
+@dataclass
 class CapturedHTTPRequest:
     path: str
     headers: dict[str, str]
     raw_body: bytes
     records: list[CapturedLogRecord] = field(default_factory=list)
+    spans: list[CapturedSpan] = field(default_factory=list)
+
+
+def _decode_logs(payload: bytes) -> list[CapturedLogRecord]:
+    proto_req = ExportLogsServiceRequest()
+    proto_req.ParseFromString(payload)
+    records: list[CapturedLogRecord] = []
+    for resource_logs in proto_req.resource_logs:
+        res_attrs = {kv.key: _any_value_to_python(kv.value) for kv in resource_logs.resource.attributes}
+        for scope_logs in resource_logs.scope_logs:
+            scope_name = scope_logs.scope.name
+            for record in scope_logs.log_records:
+                attrs = {kv.key: _any_value_to_python(kv.value) for kv in record.attributes}
+                records.append(
+                    CapturedLogRecord(
+                        body=_any_value_to_python(record.body),
+                        severity_text=record.severity_text,
+                        severity_number=int(record.severity_number),
+                        trace_id=record.trace_id.hex() if record.trace_id else "",
+                        span_id=record.span_id.hex() if record.span_id else "",
+                        attributes=attrs,
+                        resource_attributes=res_attrs,
+                        scope_name=scope_name,
+                        timestamp=int(record.time_unix_nano or record.observed_time_unix_nano),
+                    )
+                )
+    return records
+
+
+def _decode_traces(payload: bytes) -> list[CapturedSpan]:
+    trace_req = ExportTraceServiceRequest()
+    trace_req.ParseFromString(payload)
+    spans: list[CapturedSpan] = []
+    for resource_spans in trace_req.resource_spans:
+        res_attrs = {kv.key: _any_value_to_python(kv.value) for kv in resource_spans.resource.attributes}
+        for scope_spans in resource_spans.scope_spans:
+            for span in scope_spans.spans:
+                attrs = {kv.key: _any_value_to_python(kv.value) for kv in span.attributes}
+                spans.append(
+                    CapturedSpan(
+                        name=span.name,
+                        trace_id=span.trace_id.hex() if span.trace_id else "",
+                        span_id=span.span_id.hex() if span.span_id else "",
+                        attributes=attrs,
+                        resource_attributes=res_attrs,
+                    )
+                )
+    return spans
 
 
 class OtlpCaptureServer:
@@ -92,6 +153,11 @@ class OtlpCaptureServer:
         with self._lock:
             return [rec for req in self._requests for rec in req.records]
 
+    @property
+    def spans(self) -> list[CapturedSpan]:
+        with self._lock:
+            return [span for req in self._requests for span in req.spans]
+
     def record_request(self, request: CapturedHTTPRequest) -> None:
         with self._lock:
             self._requests.append(request)
@@ -127,30 +193,14 @@ class OtlpCaptureServer:
                 raw = self.rfile.read(length) if length > 0 else b""
                 headers = {k.lower(): v for k, v in self.headers.items()}
                 records: list[CapturedLogRecord] = []
+                spans: list[CapturedSpan] = []
 
-                if self.path.endswith("/v1/logs") and raw:
+                if raw:
                     payload = gzip.decompress(raw) if headers.get("content-encoding") == "gzip" else raw
-                    proto_req = ExportLogsServiceRequest()
-                    proto_req.ParseFromString(payload)
-                    for resource_logs in proto_req.resource_logs:
-                        res_attrs = {kv.key: _any_value_to_python(kv.value) for kv in resource_logs.resource.attributes}
-                        for scope_logs in resource_logs.scope_logs:
-                            scope_name = scope_logs.scope.name
-                            for record in scope_logs.log_records:
-                                attrs = {kv.key: _any_value_to_python(kv.value) for kv in record.attributes}
-                                records.append(
-                                    CapturedLogRecord(
-                                        body=_any_value_to_python(record.body),
-                                        severity_text=record.severity_text,
-                                        severity_number=int(record.severity_number),
-                                        trace_id=record.trace_id.hex() if record.trace_id else "",
-                                        span_id=record.span_id.hex() if record.span_id else "",
-                                        attributes=attrs,
-                                        resource_attributes=res_attrs,
-                                        scope_name=scope_name,
-                                        timestamp=int(record.time_unix_nano or record.observed_time_unix_nano),
-                                    )
-                                )
+                    if self.path.endswith("/v1/logs"):
+                        records = _decode_logs(payload)
+                    elif self.path.endswith("/v1/traces"):
+                        spans = _decode_traces(payload)
 
                 outer.record_request(
                     CapturedHTTPRequest(
@@ -158,12 +208,16 @@ class OtlpCaptureServer:
                         headers=headers,
                         raw_body=raw,
                         records=records,
+                        spans=spans,
                     )
                 )
 
-                body = (
-                    ExportLogsServiceResponse().SerializeToString() if outer.status_code == 200 else b"export failure"
+                response_bytes = (
+                    ExportTraceServiceResponse().SerializeToString()
+                    if self.path.endswith("/v1/traces")
+                    else ExportLogsServiceResponse().SerializeToString()
                 )
+                body = response_bytes if outer.status_code == 200 else b"export failure"
                 self.send_response(outer.status_code)
                 self.send_header("Content-Type", "application/x-protobuf")
                 self.send_header("Content-Length", str(len(body)))
